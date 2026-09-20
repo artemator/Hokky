@@ -191,7 +191,7 @@
       transform: scale(1.15);
     }
 
-    /* ХОЛСТ */
+    /* ОБЛАСТЬ ХОЛСТА */
     .canvas-container-outer {
       flex: 1;
       display: flex;
@@ -281,29 +281,47 @@
       border-color: #38bdf8;
       color: #fff;
     }
-    /* Скрываем содержимое групп в панели, когда включен фуллскрин */
     body.is-fullscreen .sidebar .sidebar-group-content {
       display: none !important;
     }
 
-    /* ГЛОБАЛЬНЫЙ POPOVER В BODY (НАД ХОЛСТОМ НА 100%) */
+    /* ЗАТЕМНЯЮЩИЙ ФОН ДЛЯ IPHONE */
+    .bottom-sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 999999998 !important;
+      -webkit-backdrop-filter: blur(2px);
+      backdrop-filter: blur(2px);
+      touch-action: none;
+    }
+    .bottom-sheet-overlay.active {
+      display: block;
+    }
+
+    /* БАЗОВЫЙ БЛОК ГЛОБАЛЬНОГО МЕНЮ */
     #globalPopoverMenu {
       display: none;
       position: fixed;
       background: #151f32;
       border: 1px solid var(--accent-blue);
+      box-shadow: 0 16px 45px rgba(0,0,0,0.98);
+      z-index: 999999999 !important;
+    }
+
+    /* СТИЛЬ ДЛЯ ANDROID / ПК: Всплывающий поповер над кнопкой со стрелочкой */
+    #globalPopoverMenu.mode-android-popover {
       border-radius: 10px;
       padding: 10px;
-      box-shadow: 0 16px 45px rgba(0,0,0,0.98);
-      z-index: 99999999 !important;
       min-width: 220px;
       white-space: nowrap;
     }
-    #globalPopoverMenu.active {
+    #globalPopoverMenu.mode-android-popover.active {
       display: block;
       animation: popIn 0.15s ease-out;
     }
-    #globalPopoverMenu::after {
+    #globalPopoverMenu.mode-android-popover::after {
       content: '';
       position: absolute;
       bottom: -6px;
@@ -318,6 +336,48 @@
     @keyframes popIn {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* СТИЛЬ ДЛЯ IPHONE: Нижняя выезжающая шторка Action Sheet */
+    #globalPopoverMenu.mode-ios-sheet {
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      border-top: 2px solid var(--accent-blue);
+      border-radius: 16px 16px 0 0;
+      padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)) 16px;
+      transform: translateY(100%);
+      transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      max-height: 60vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #globalPopoverMenu.mode-ios-sheet::after {
+      display: none;
+    }
+    #globalPopoverMenu.mode-ios-sheet.active {
+      display: block;
+      transform: translateY(0);
+    }
+    #globalPopoverMenu.mode-ios-sheet .tools-grid {
+      grid-template-columns: repeat(3, 1fr) !important;
+      gap: 8px !important;
+    }
+    #globalPopoverMenu.mode-ios-sheet button {
+      padding: 11px 8px !important;
+      font-size: 12px !important;
+      justify-content: center !important;
+    }
+    #globalPopoverMenu.mode-ios-sheet .palette-row {
+      justify-content: space-around;
+      padding: 6px 0;
+    }
+    #globalPopoverMenu.mode-ios-sheet .color-swatch {
+      width: 34px;
+      height: 34px;
     }
 
     .tracing-floating-bar {
@@ -746,7 +806,8 @@
   </main>
 </div>
 
-<!-- ГЛОБАЛЬНЫЙ POPOVER ВНЕ SIDEBAR ДЛЯ 100% ПЕРЕКРЫТИЯ ХОЛСТА НА IPHONE -->
+<!-- ПОДЛОЖКА И ЕДИНОЕ МЕНЮ (АДАПТИВНОЕ: ШТОРКА ДЛЯ IOS / ПОПОВЕР ДЛЯ ANDROID) -->
+<div id="popoverOverlay" class="bottom-sheet-overlay" onclick="closeContextPopover()"></div>
 <div id="globalPopoverMenu"></div>
 
 <!-- МОДАЛЬНОЕ ОКНО: БИБЛИОТЕКА СХЕМ -->
@@ -835,6 +896,10 @@
 </div>
 
 <script>
+  // ТОЧНОЕ ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ (IOS / IPHONE / IPAD ПРОТИВ ANDROID / ДЕСКТОП)
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   const VIRTUAL_WIDTH_FULL = 1100;
   const VIRTUAL_WIDTH_HALF = 550;
   const VIRTUAL_HEIGHT = 580;
@@ -873,9 +938,10 @@
 
   let currentActiveGroupId = null;
 
-  // Закрытие контекстного окна и возврат контента в родной блок
+  // Закрытие меню с возвратом элементов в исходный контейнер
   function closeContextPopover() {
     const popover = document.getElementById('globalPopoverMenu');
+    const overlay = document.getElementById('popoverOverlay');
     if (!popover) return;
     
     if (currentActiveGroupId) {
@@ -889,11 +955,16 @@
       if (trigger) trigger.classList.remove('active-category');
       currentActiveGroupId = null;
     }
+    
     popover.classList.remove('active');
-    popover.style.display = 'none';
+    setTimeout(() => {
+      if (!currentActiveGroupId) popover.style.display = 'none';
+    }, isIOS ? 220 : 50);
+
+    if (overlay) overlay.classList.remove('active');
   }
 
-  // ОТКРЫТИЕ ПОПОВЕРА ПРЯМО В BODY ДЛЯ ГАРАНТИРОВАННОГО ПЕРЕКРЫТИЯ ХОЛСТА
+  // Открытие меню: адаптивное переключение между поведением iOS и Android
   function toggleSidebarGroup(groupId, e) {
     if (e) {
       e.preventDefault();
@@ -902,6 +973,7 @@
     if (!document.body.classList.contains('is-fullscreen')) return;
 
     const popover = document.getElementById('globalPopoverMenu');
+    const overlay = document.getElementById('popoverOverlay');
     const targetGroup = document.getElementById(groupId);
     if (!targetGroup || !popover) return;
 
@@ -922,24 +994,34 @@
       popover.appendChild(contentBlock.firstChild);
     }
 
-    const btnRect = triggerBtn.getBoundingClientRect();
-    const popoverWidth = 230;
+    if (isIOS) {
+      // РЕЖИМ IPHONE: Выезжающая снизу шторка поверх холста
+      popover.className = 'mode-ios-sheet';
+      if (overlay) overlay.classList.add('active');
+      popover.style.display = 'block';
+      setTimeout(() => popover.classList.add('active'), 10);
+    } else {
+      // РЕЖИМ ANDROID / ДЕСКТОП: Компактный поповер со стрелкой над нажатой кнопкой
+      popover.className = 'mode-android-popover';
+      const btnRect = triggerBtn.getBoundingClientRect();
+      const popoverWidth = 230;
 
-    let leftPos = btnRect.left + (btnRect.width / 2) - (popoverWidth / 2);
-    if (leftPos < 8) leftPos = 8;
-    if (leftPos + popoverWidth > window.innerWidth - 8) {
-      leftPos = window.innerWidth - popoverWidth - 8;
+      let leftPos = btnRect.left + (btnRect.width / 2) - (popoverWidth / 2);
+      if (leftPos < 8) leftPos = 8;
+      if (leftPos + popoverWidth > window.innerWidth - 8) {
+        leftPos = window.innerWidth - popoverWidth - 8;
+      }
+
+      const bottomOffset = window.innerHeight - btnRect.top + 8;
+      popover.style.left = `${leftPos}px`;
+      popover.style.bottom = `${bottomOffset}px`;
+
+      const arrowOffset = Math.max(14, Math.min(popoverWidth - 14, (btnRect.left + btnRect.width / 2) - leftPos));
+      popover.style.setProperty('--arrow-left', `${arrowOffset}px`);
+
+      popover.style.display = 'block';
+      popover.classList.add('active');
     }
-
-    const bottomOffset = window.innerHeight - btnRect.top + 8;
-
-    popover.style.left = `${leftPos}px`;
-    popover.style.bottom = `${bottomOffset}px`;
-    popover.style.display = 'block';
-    popover.classList.add('active');
-
-    const arrowOffset = Math.max(14, Math.min(popoverWidth - 14, (btnRect.left + btnRect.width / 2) - leftPos));
-    popover.style.setProperty('--arrow-left', `${arrowOffset}px`);
   }
 
   function toggleFullScreen() {
@@ -989,8 +1071,9 @@
     }
   });
 
+  // Закрытие при клике мимо поповера на Android/ПК
   document.addEventListener('pointerdown', (e) => {
-    if (document.body.classList.contains('is-fullscreen')) {
+    if (!isIOS && document.body.classList.contains('is-fullscreen')) {
       const popover = document.getElementById('globalPopoverMenu');
       const sidebar = document.getElementById('mainSidebar');
       if (popover && popover.classList.contains('active')) {
