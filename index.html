@@ -424,7 +424,6 @@
       justify-content: center;
       z-index: 1000000;
     }
-    /* ОКНО ПРЕДПРОСМОТРА ВСЕГДА ВЫШЕ ВСЕХ */
     #imagePreviewModal {
       z-index: 20000000 !important;
       background: rgba(0, 0, 0, 0.9) !important;
@@ -706,8 +705,8 @@
       <span class="size-control-value" id="objectScaleLabel">1.0x</span>
     </div>
 
-    <button class="btn-secondary" onclick="exportDatabaseJSON()" title="Скачать файл со всеми упражнениями">
-      <i class="ph-bold ph-file-arrow-down"></i> Резерв
+    <button class="btn-secondary" onclick="exportDatabaseJSON()" title="Поделиться или скачать файл базы схем">
+      <i class="ph-bold ph-share-network"></i> Резерв
     </button>
     <input type="file" id="importDatabaseInput" accept=".json" style="display:none;" onchange="importDatabaseJSON(event)">
     <button class="btn-secondary" onclick="document.getElementById('importDatabaseInput').click()" title="Импортировать и объединить базы">
@@ -898,7 +897,7 @@
   </div>
 </div>
 
-<!-- МОДАЛЬНОЕ ОКНО: ПРЕВЬЮ СХЕМЫ (САМЫЙ ВЫСОКИЙ ПРИОРИТЕТ Z-INDEX) -->
+<!-- МОДАЛЬНОЕ ОКНО: ПРЕВЬЮ СХЕМЫ -->
 <div class="modal-overlay" id="imagePreviewModal">
   <div class="modal-card" style="width: 760px; align-items: center; padding: 15px;">
     <div class="modal-header" style="width: 100%; border-bottom: none; padding-bottom: 0;">
@@ -2297,16 +2296,35 @@
     alert(`Схема сохранена как «${finalTitle}»!`);
   }
 
-  function exportDatabaseJSON() {
+  // ОБНОВЛЕННЫЙ ЭКСПОРТ РЕЗЕРВА: СИСТЕМНЫЙ ШЕРИНГ В МЕССЕНДЖЕРЫ НА СМАРТФОНАХ
+  async function exportDatabaseJSON() {
     const drills = getDrills();
     if (drills.length === 0) {
       alert('У вас пока нет сохраненных упражнений для экспорта.');
       return;
     }
+    
     const dataStr = JSON.stringify(drills, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
     const dateStr = new Date().toISOString().slice(0, 10);
-    saveAs(blob, `hockey_drills_backup_${dateStr}.json`);
+    const fileName = `hockey_drills_backup_${dateStr}.json`;
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const file = new File([blob], fileName, { type: 'application/json' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Резервная копия схем',
+          text: 'База упражнений хоккейного планшета'
+        });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.warn('Ошибка при вызове share, скачиваем файлом:', err);
+      }
+    }
+
+    saveAs(blob, fileName);
   }
 
   function importDatabaseJSON(e) {
@@ -2738,7 +2756,6 @@
     refreshSelectionBadges();
   }
 
-  // ОТРИСОВКА ОЧЕРЕДИ СХЕМ С КНОПКАМИ ИЗМЕНЕНИЯ ПОРЯДКА (ВЛЕВО / ВПРАВО)
   function renderSelectedQueue() {
     const container = document.getElementById('workoutQueueContainer');
     const track = document.getElementById('selectedQueueTrack');
