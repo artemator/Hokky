@@ -136,7 +136,7 @@
       position: relative;
     }
 
-    /* БОКОВАЯ ПАНЕЛЬ (ОБЫЧНЫЙ РЕЖИМ) */
+    /* БОКОВАЯ ПАНЕЛЬ */
     .sidebar {
       width: 290px;
       background: var(--panel-bg);
@@ -285,7 +285,6 @@
       display: none !important;
     }
 
-    /* ЗАТЕМНЯЮЩИЙ ФОН ДЛЯ IPHONE */
     .bottom-sheet-overlay {
       display: none;
       position: fixed;
@@ -300,7 +299,6 @@
       display: block;
     }
 
-    /* БАЗОВЫЙ БЛОК ГЛОБАЛЬНОГО МЕНЮ */
     #globalPopoverMenu {
       display: none;
       position: fixed;
@@ -309,8 +307,6 @@
       box-shadow: 0 16px 45px rgba(0,0,0,0.98);
       z-index: 999999999 !important;
     }
-
-    /* СТИЛЬ ДЛЯ ANDROID / ПК: Всплывающий поповер над кнопкой со стрелочкой */
     #globalPopoverMenu.mode-android-popover {
       border-radius: 10px;
       padding: 10px;
@@ -338,7 +334,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* СТИЛЬ ДЛЯ IPHONE: Нижняя выезжающая шторка Action Sheet */
     #globalPopoverMenu.mode-ios-sheet {
       left: 0 !important;
       right: 0 !important;
@@ -427,15 +422,21 @@
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 100000000;
+      z-index: 1000000;
     }
+    /* ОКНО ПРЕДПРОСМОТРА ВСЕГДА ВЫШЕ ВСЕХ */
+    #imagePreviewModal {
+      z-index: 20000000 !important;
+      background: rgba(0, 0, 0, 0.9) !important;
+    }
+
     .modal-card {
       background: var(--panel-bg);
       border: 1px solid var(--border-color);
       border-radius: 12px;
-      width: 820px;
-      max-width: 95vw;
-      max-height: 88vh;
+      width: 840px;
+      max-width: 96vw;
+      max-height: 90vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -454,11 +455,77 @@
       flex-direction: column;
       gap: 12px;
     }
+
+    /* СЕКЦИЯ ОЧЕРЕДИ ВЫБРАННЫХ УПРАЖНЕНИЙ */
+    .selected-queue-container {
+      background: #090e17;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .selected-queue-track {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      -webkit-overflow-scrolling: touch;
+      min-height: 120px;
+      align-items: center;
+    }
+    .queue-card {
+      flex: 0 0 140px;
+      background: #1e293b;
+      border: 1px solid var(--accent-blue);
+      border-radius: 6px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+    .queue-card img {
+      width: 100%;
+      height: 70px;
+      object-fit: cover;
+      background: #fff;
+    }
+    .queue-card-body {
+      padding: 5px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .queue-order-badge {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: #0284c7;
+      color: #fff;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+    .queue-controls {
+      display: flex;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .queue-controls button {
+      padding: 3px 6px;
+      font-size: 10px;
+      flex: 1;
+      justify-content: center;
+    }
+
     .drills-grid-selectable {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
       gap: 10px;
-      max-height: 420px;
+      max-height: 380px;
       overflow-y: auto;
       padding-right: 4px;
     }
@@ -806,7 +873,7 @@
   </main>
 </div>
 
-<!-- ПОДЛОЖКА И ЕДИНОЕ МЕНЮ (АДАПТИВНОЕ: ШТОРКА ДЛЯ IOS / ПОПОВЕР ДЛЯ ANDROID) -->
+<!-- ПОДЛОЖКА И ЕДИНОЕ МЕНЮ -->
 <div id="popoverOverlay" class="bottom-sheet-overlay" onclick="closeContextPopover()"></div>
 <div id="globalPopoverMenu"></div>
 
@@ -831,22 +898,22 @@
   </div>
 </div>
 
-<!-- МОДАЛЬНОЕ ОКНО: ПРЕВЬЮ СХЕМЫ НА ВЕСЬ ЭКРАН -->
+<!-- МОДАЛЬНОЕ ОКНО: ПРЕВЬЮ СХЕМЫ (САМЫЙ ВЫСОКИЙ ПРИОРИТЕТ Z-INDEX) -->
 <div class="modal-overlay" id="imagePreviewModal">
-  <div class="modal-card" style="width: 720px; align-items: center; padding: 15px;">
+  <div class="modal-card" style="width: 760px; align-items: center; padding: 15px;">
     <div class="modal-header" style="width: 100%; border-bottom: none; padding-bottom: 0;">
       <h3 id="previewModalTitle" style="font-size: 16px; color: var(--accent-blue);">Предпросмотр</h3>
       <button onclick="closeImagePreview()"><i class="ph ph-x"></i></button>
     </div>
     <div style="width: 100%; display: flex; justify-content: center; align-items: center; margin-top: 10px; background: #fff; border-radius: 8px; overflow: hidden; padding: 10px;">
-      <img id="previewModalImg" src="" style="max-width: 100%; max-height: 70vh; object-fit: contain;">
+      <img id="previewModalImg" src="" style="max-width: 100%; max-height: 72vh; object-fit: contain;">
     </div>
   </div>
 </div>
 
 <!-- МОДАЛЬНОЕ ОКНО: КОНСТРУКТОР ТРЕНИРОВКИ (DOCX) -->
 <div class="modal-overlay" id="workoutBuilderModal">
-  <div class="modal-card" style="width: 840px;">
+  <div class="modal-card">
     <div class="modal-header">
       <h3 style="font-size:15px; display:flex; align-items:center; gap:8px;">
         <i class="ph-bold ph-file-doc" style="color:var(--accent-blue);"></i> Конструктор конспекта тренировки (Word DOCX)
@@ -869,9 +936,20 @@
         </div>
       </div>
 
+      <!-- ВЫДЕЛЕННЫЙ БЛОК: ОЧЕРЕДЬ ВЫБРАННЫХ СХЕМ С ИЗМЕНЕНИЕМ ПОРЯДКА -->
+      <div class="selected-queue-container" id="workoutQueueContainer" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:11px; font-weight:700; color:var(--accent-blue); text-transform:uppercase;">
+            <i class="ph-bold ph-list-numbers"></i> Очередь упражнений в тренировке (порядок в Word)
+          </span>
+          <span style="font-size:11px; color:var(--text-muted);" id="queueCountLabel">0 шт.</span>
+        </div>
+        <div class="selected-queue-track" id="selectedQueueTrack"></div>
+      </div>
+
       <div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-          <div class="section-title" style="margin-bottom:0;">Выберите упражнения (нажмите на «+»)</div>
+          <div class="section-title" style="margin-bottom:0;">Каталог упражнений (нажмите «+» чтобы добавить в очередь)</div>
         </div>
         <div class="filter-bar-row" style="margin-bottom: 6px;">
           <input type="text" id="drillSearchInput" class="search-input-box" placeholder="🔍 Поиск по названию схемы..." oninput="filterDrillsGrid()">
@@ -896,7 +974,6 @@
 </div>
 
 <script>
-  // ТОЧНОЕ ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ (IOS / IPHONE / IPAD ПРОТИВ ANDROID / ДЕСКТОП)
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -938,7 +1015,6 @@
 
   let currentActiveGroupId = null;
 
-  // Закрытие меню с возвратом элементов в исходный контейнер
   function closeContextPopover() {
     const popover = document.getElementById('globalPopoverMenu');
     const overlay = document.getElementById('popoverOverlay');
@@ -964,7 +1040,6 @@
     if (overlay) overlay.classList.remove('active');
   }
 
-  // Открытие меню: адаптивное переключение между поведением iOS и Android
   function toggleSidebarGroup(groupId, e) {
     if (e) {
       e.preventDefault();
@@ -995,13 +1070,11 @@
     }
 
     if (isIOS) {
-      // РЕЖИМ IPHONE: Выезжающая снизу шторка поверх холста
       popover.className = 'mode-ios-sheet';
       if (overlay) overlay.classList.add('active');
       popover.style.display = 'block';
       setTimeout(() => popover.classList.add('active'), 10);
     } else {
-      // РЕЖИМ ANDROID / ДЕСКТОП: Компактный поповер со стрелкой над нажатой кнопкой
       popover.className = 'mode-android-popover';
       const btnRect = triggerBtn.getBoundingClientRect();
       const popoverWidth = 230;
@@ -1071,7 +1144,6 @@
     }
   });
 
-  // Закрытие при клике мимо поповера на Android/ПК
   document.addEventListener('pointerdown', (e) => {
     if (!isIOS && document.body.classList.contains('is-fullscreen')) {
       const popover = document.getElementById('globalPopoverMenu');
@@ -2610,6 +2682,7 @@
     selectedWorkoutDrills = [];
     updateSelectedCount();
     renderWorkoutSelectableGrid();
+    renderSelectedQueue();
     if (modal) modal.style.display = 'flex';
   }
 
@@ -2665,6 +2738,60 @@
     refreshSelectionBadges();
   }
 
+  // ОТРИСОВКА ОЧЕРЕДИ СХЕМ С КНОПКАМИ ИЗМЕНЕНИЯ ПОРЯДКА (ВЛЕВО / ВПРАВО)
+  function renderSelectedQueue() {
+    const container = document.getElementById('workoutQueueContainer');
+    const track = document.getElementById('selectedQueueTrack');
+    const countLabel = document.getElementById('queueCountLabel');
+    if (!container || !track) return;
+
+    if (selectedWorkoutDrills.length === 0) {
+      container.style.display = 'none';
+      track.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'flex';
+    countLabel.textContent = `${selectedWorkoutDrills.length} шт.`;
+    track.innerHTML = '';
+
+    selectedWorkoutDrills.forEach((drill, index) => {
+      const card = document.createElement('div');
+      card.className = 'queue-card';
+      card.innerHTML = `
+        <span class="queue-order-badge">№${index + 1}</span>
+        <img src="${drill.thumb}" onclick="openImagePreview('${drill.fullImage || drill.thumb}', '${drill.title}');" style="cursor:pointer;" title="Нажмите для увеличения">
+        <div class="queue-card-body">
+          <span style="font-size:10px; font-weight:700; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${drill.title}">${drill.title}</span>
+          <div class="queue-controls">
+            <button ${index === 0 ? 'disabled' : ''} onclick="moveQueueItem(${index}, -1)" title="Сдвинуть влево">◀</button>
+            <button class="btn-danger" onclick="removeFromQueue(${index})" title="Убрать из очереди">✕</button>
+            <button ${index === selectedWorkoutDrills.length - 1 ? 'disabled' : ''} onclick="moveQueueItem(${index}, 1)" title="Сдвинуть вправо">▶</button>
+          </div>
+        </div>
+      `;
+      track.appendChild(card);
+    });
+  }
+
+  function moveQueueItem(index, direction) {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= selectedWorkoutDrills.length) return;
+
+    const item = selectedWorkoutDrills.splice(index, 1)[0];
+    selectedWorkoutDrills.splice(newIndex, 0, item);
+
+    renderSelectedQueue();
+    refreshSelectionBadges();
+  }
+
+  function removeFromQueue(index) {
+    selectedWorkoutDrills.splice(index, 1);
+    renderSelectedQueue();
+    refreshSelectionBadges();
+    updateSelectedCount();
+  }
+
   function toggleDrillSelection(id, e) {
     e.stopPropagation();
     const drills = getDrills();
@@ -2678,6 +2805,7 @@
       selectedWorkoutDrills.push(target);
     }
 
+    renderSelectedQueue();
     refreshSelectionBadges();
     updateSelectedCount();
   }
