@@ -1012,7 +1012,125 @@
   let tracingObject = null;
   let isTracingLocked = false;
 
-  let currentActiveGroupId = null;
+let currentActiveGroupId = null;
+
+  // Управление интерактивными точками-ручками для ломаных/дуг
+  let activeControlLine = null;
+  let activeControlHandles = [];
+
+  function clearLineHandles() {
+    if (activeControlHandles.length > 0) {
+      activeControlHandles.forEach(h => canvas.remove(h));
+      activeControlHandles = [];
+    }
+    activeControlLine = null;
+    canvas.requestRenderAll();
+  }
+
+  function renderLineHandles(groupObj) {
+    clearLineHandles();
+    if (!groupObj || !groupObj.controlPoints || groupObj.controlPoints.length < 2) return;
+
+    activeControlLine = groupObj;
+    const pts = groupObj.controlPoints;
+
+    // Опорные вершины (начало, конец и уже изогнутые точки)
+    pts.forEach((pt, idx) => {
+      const handle = new fabric.Circle({
+        left: pt.x,
+        top: pt.y,
+        radius: 6 * globalObjectScale,
+        fill: '#38bdf8',
+        stroke: '#ffffff',
+        strokeWidth: 2,
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        selectable: true,
+        isControlHandle: true,
+        pointIndex: idx,
+        isMidpoint: false
+      });
+      activeControlHandles.push(handle);
+      canvas.add(handle);
+      handle.bringToFront();
+    });
+
+    // Средние точки для выгибания каждого сегмента в дугу
+    for (let i = 0; i < pts.length - 1; i++) {
+      const midX = (pts[i].x + pts[i + 1].x) / 2;
+      const midY = (pts[i].y + pts[i + 1].y) / 2;
+
+      const midHandle = new fabric.Circle({
+        left: midX,
+        top: midY,
+        radius: 4.5 * globalObjectScale,
+        fill: '#f59e0b',
+        stroke: '#ffffff',
+        strokeWidth: 1.5,
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        selectable: true,
+        isControlHandle: true,
+        segIndex: i,
+        isMidpoint: true
+      });
+      activeControlHandles.push(midHandle);
+      canvas.add(midHandle);
+      midHandle.bringToFront();
+    }
+    canvas.requestRenderAll();
+  }
+
+  function updateTacticalGroupFromPoints(groupObj) {
+    const pts = groupObj.controlPoints;
+    const pat = groupObj.linePattern || currentPattern;
+    const clr = groupObj.lineColor || currentColor;
+    const end = groupObj.lineEnding || currentEnding;
+
+    const { svg, dots } = generateHockeyTacticalSVG(pts, pat);
+    const lineObj = new fabric.Path(svg, {
+      stroke: clr,
+      strokeWidth: (pat === 'pucks_line') ? Math.round(5 * globalObjectScale) : strokeWidth,
+      strokeDashArray: getStrokeDashForPattern(pat),
+      fill: 'transparent',
+      strokeLineCap: 'round',
+      strokeLineJoin: 'round'
+    });
+
+    const items = [lineObj];
+    dots.forEach(d => {
+      items.push(new fabric.Circle({
+        left: d.x, top: d.y, radius: 2.6 * globalObjectScale, fill: clr, originX: 'center', originY: 'center'
+      }));
+    });
+
+    const pLast = pts[pts.length - 1];
+    const pPrev = pts[pts.length - 2] || pts[0];
+    const angle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x) * (180 / Math.PI);
+    
+    // Временно выставляем текущие значения для генератора окончания
+    const prevEnding = currentEnding;
+    const prevColor = currentColor;
+    currentEnding = end;
+    currentColor = clr;
+    const marker = createTacticalEnding(pLast.x, pLast.y, angle);
+    currentEnding = prevEnding;
+    currentColor = prevColor;
+
+    if (marker) items.push(marker);
+
+    // Очищаем содержимое группы и перезаполняем новыми элементами
+    while (groupObj.size() > 0) {
+      groupObj.remove(groupObj.item(0));
+    }
+    items.forEach(it => groupObj.addWithUpdate(it));
+    groupObj.setCoords();
+    canvas.requestRenderAll();
+  }
 
   function closeContextPopover() {
     const popover = document.getElementById('globalPopoverMenu');
@@ -1920,11 +2038,79 @@
     return null;
   }
 
-  function setupCanvasEvents() {
+function setupCanvasEvents() {
+    // Выделение линии отображает её точки в режиме "select"
+    canvas.on('selection:created', (e) => {
+      if (currentTool === 'select' && e.selected && e.selected.length === 1 && e.selected[0].controlPoints) {
+        renderLineHandles(e.selected[0]);
+      } else {
+        clearLineHandles();
+      }
+    });
+
+    canvas.on('selection:updated', (e) => {
+      if (currentTool === 'select' && e.selected && e.selected.length === 1 && e.selected[0].controlPoints) {
+        renderLineHandles(e.selected[0]);
+      } else {
+        clearLineHandles();
+      }
+    });
+
+    canvas.on('selection:cleared', () => {
+      clearLineHandles();
+    });
+
+    // Обработка перетаскивания точек-ручек
+    canvas.on('object:moving', (e) => {
+      const target = e.target;
+      if (target && target.isControlHandle && activeControlLine) {
+        const pointer = { x: target.left, y: target.top };
+        if (target.isMidpoint) {
+          // Вытягивание середины сегмента превращает прямую в дугу (добавляет точку)
+          const insertIdx = target.segIndex + 1;
+          activeControlLine.controlPoints.splice(insertIdx, 0, pointer);
+          updateTacticalGroupFromPoints(activeControlLine);
+          renderLineHandles(activeControlLine);
+          // Перехватываем управление новой постоянной вершиной
+          const newHandle = activeControlHandles.find(h => !h.isMidpoint && h.pointIndex === insertIdx);
+          if (newHandle) canvas.setActiveObject(newHandle);
+        } else {
+          // Перемещение начала, конца или промежуточной точки
+          activeControlLine.controlPoints[target.pointIndex] = pointer;
+          updateTacticalGroupFromPoints(activeControlLine);
+          // Обновляем позиции промежуточных желтых точек
+          for (let i = 0; i < activeControlHandles.length; i++) {
+            const h = activeControlHandles[i];
+            if (h.isMidpoint) {
+              const pts = activeControlLine.controlPoints;
+              h.set({
+                left: (pts[h.segIndex].x + pts[h.segIndex + 1].x) / 2,
+                top: (pts[h.segIndex].y + pts[h.segIndex + 1].y) / 2
+              });
+              h.setCoords();
+            }
+          }
+        }
+        canvas.requestRenderAll();
+      }
+    });
+
+    canvas.on('object:modified', (e) => {
+      if (e.target && e.target.isControlHandle && activeControlLine) {
+        saveState();
+      }
+    });
+
     canvas.on('mouse:down', (opt) => {
       const p = canvas.getPointer(opt.e);
 
+      // Если кликнули по контрольной ручке — не перебиваем перемещение
+      if (opt.target && opt.target.isControlHandle) {
+        return;
+      }
+
       if (currentTool === 'placement') {
+        clearLineHandles();
         executePlacement(p);
         return;
       }
@@ -2025,7 +2211,7 @@
           canvas.add(group);
           saveState();
         }
-      } else if (currentTool === 'straightArrow' && straightLine) {
+} else if (currentTool === 'straightArrow' && straightLine) {
         const x1 = straightLine.x1, y1 = straightLine.y1, x2 = straightLine.x2, y2 = straightLine.y2;
         canvas.remove(straightLine);
         straightLine = null;
@@ -2054,16 +2240,20 @@
 
           if (marker) items.push(marker);
           const group = new fabric.Group(items, {
-            selectable: (currentTool === 'select'),
-            hasControls: true,
-            customType: 'tactical_trajectory'
+            selectable: true,
+            hasControls: false, // ручки заменяют габаритные рамки
+            customType: 'tactical_trajectory',
+            controlPoints: pts,
+            linePattern: currentPattern,
+            lineColor: currentColor,
+            lineEnding: currentEnding
           });
           canvas.add(group);
+          // Автоматически отображаем 3 контрольные точки (начало, середина, конец)
+          renderLineHandles(group);
           saveState();
         }
       }
-    });
-  }
 
   function deleteActiveObject() {
     const activeObj = canvas.getActiveObject();
@@ -2098,7 +2288,8 @@
     });
   }
 
-  function setTool(tool) {
+function setTool(tool) {
+    clearLineHandles();
     currentTool = tool;
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
     if (tool !== 'placement') {
