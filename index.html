@@ -2296,11 +2296,21 @@
     canvas.on('mouse:down', (opt) => {
       const p = canvas.getPointer(opt.e);
 
+      // Если кликнули по контрольной ручке — не перебиваем перемещение
       if (opt.target && opt.target.isControlHandle) {
         return;
       }
 
+      // Если кликнули по уже существующему объекту (появился курсор перемещения) —
+      // перемещаем этот объект и не создаем поверх него новые элементы
+      const isOverSelectableObject = opt.target && opt.target.name !== 'rink_bg' && opt.target !== tracingObject;
+
       if (currentTool === 'placement') {
+        if (isOverSelectableObject) {
+          canvas.setActiveObject(opt.target);
+          canvas.requestRenderAll();
+          return;
+        }
         clearLineHandles();
         executePlacement(p);
         return;
@@ -2313,6 +2323,13 @@
           if (removedRole) renumberPlayers(removedRole);
           saveState();
         }
+        return;
+      }
+
+      // Если активны кисть или стрелка, но клик пришёлся по объекту — позволяем его перемещать
+      if ((currentTool === 'brush' || currentTool === 'straightArrow') && isOverSelectableObject) {
+        canvas.setActiveObject(opt.target);
+        canvas.requestRenderAll();
         return;
       }
 
@@ -2491,7 +2508,7 @@
     canvas.forEachObject(obj => {
       if (obj.name !== 'rink_bg' && obj !== tracingObject) {
         obj.selectable = (tool === 'select');
-        obj.evented = (tool === 'select' || tool === 'eraser');
+        obj.evented = true; // разрешаем события касания и кликов для быстрого перемещения
       }
     });
 
@@ -3043,8 +3060,7 @@
     const refereeCrease = new fabric.Circle({
       left: centerX, top: bottomY, originX: 'center', originY: 'center',
       radius: 3.0 * m, startAngle: Math.PI, endAngle: 2 * Math.PI,
-      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
-    });
+      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
 
     const trapGoalHalfW = 3.35 * m;
     const trapBoardHalfW = 4.265 * m;
@@ -3121,13 +3137,11 @@
     const centerCircleHalf = new fabric.Circle({
       left: rightX, top: centerY, originX: 'center', originY: 'center',
       radius: centerRadius, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
-      fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
-    });
+      fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
     const centerDotHalf = new fabric.Circle({
       left: rightX, top: centerY, originX: 'center', originY: 'center',
       radius: 0.3 * m, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
-      fill: blue, selectable: false, evented: false, name: 'rink_bg'
-    });
+      fill: blue, selectable: false, evented: false, name: 'rink_bg' });
 
     const blueLineX = rightX - (7.14 * m);
     const blueLine = new fabric.Line([blueLineX, topY, blueLineX, bottomY], { stroke: blue, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
@@ -3198,8 +3212,7 @@
     const refereeCrease = new fabric.Circle({
       left: centerX, top: bottomY, originX: 'center', originY: 'center',
       radius: 3.0 * m, startAngle: Math.PI, endAngle: 2 * Math.PI,
-      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
-    });
+      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
 
     canvas.add(blueLineL, blueLineR, centerRed, centerCircle, centerDot, refereeCrease);
 
