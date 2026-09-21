@@ -14,6 +14,8 @@
   <!-- Библиотека генерации Word (.docx) и скачивания файлов -->
   <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <!-- Хранилище IndexedDB без ограничений 5 МБ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 
   <style>
     :root {
@@ -1023,6 +1025,12 @@
 </div>
 
 <script>
+  localforage.config({
+    name: 'HockeyTacticsPro',
+    storeName: 'hockey_app_store',
+    description: 'Надежное неограниченное хранилище схем и изображений'
+  });
+
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -1068,6 +1076,47 @@
 
   let activeControlLine = null;
   let activeControlHandles = [];
+  let draggingMidData = null;
+
+  async function getDrills() {
+    let drills = await localforage.getItem('hockey_pro_drills');
+    if (!drills) {
+      try {
+        const legacy = JSON.parse(localStorage.getItem('hockey_pro_drills') || '[]');
+        if (Array.isArray(legacy) && legacy.length > 0) {
+          drills = legacy;
+          await localforage.setItem('hockey_pro_drills', drills);
+        }
+      } catch (e) {}
+    }
+    if (!drills) drills = [];
+    drills.forEach(d => {
+      if (!d.createdAt) d.createdAt = d.id || 0;
+    });
+    return drills;
+  }
+
+  async function saveDrills(drills) {
+    return await localforage.setItem('hockey_pro_drills', drills);
+  }
+
+  async function getCustomBgs() {
+    let bgs = await localforage.getItem('hockey_custom_bgs');
+    if (!bgs) {
+      try {
+        const legacy = JSON.parse(localStorage.getItem('hockey_custom_bgs') || '[]');
+        if (Array.isArray(legacy) && legacy.length > 0) {
+          bgs = legacy;
+          await localforage.setItem('hockey_custom_bgs', bgs);
+        }
+      } catch (e) {}
+    }
+    return bgs || [];
+  }
+
+  async function saveCustomBgs(bgs) {
+    return await localforage.setItem('hockey_custom_bgs', bgs);
+  }
 
   function setPlayerStampMode(mode) {
     playerStampMode = mode;
@@ -1078,6 +1127,11 @@
   }
 
   function clearLineHandles() {
+    if (draggingMidData) {
+      if (draggingMidData.fixedDot) canvas.remove(draggingMidData.fixedDot);
+      if (draggingMidData.guideLine) canvas.remove(draggingMidData.guideLine);
+      draggingMidData = null;
+    }
     if (activeControlHandles.length > 0) {
       activeControlHandles.forEach(h => canvas.remove(h));
       activeControlHandles = [];
@@ -1104,8 +1158,9 @@
       }));
     });
 
-    const pLast = pts[pts.length - 1];
-    const pPrev = pts[pts.length - 2] || pts[0];
+    const finePts = getSampledCurvePoints(pts);
+    const pLast = finePts[finePts.length - 1];
+    const pPrev = finePts[Math.max(0, finePts.length - 3)] || finePts[0];
     const angle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x) * (180 / Math.PI);
 
     const prevEnding = currentEnding;
@@ -1169,7 +1224,7 @@
         left: midX,
         top: midY,
         radius: 5 * globalObjectScale,
-        fill: '#f59e0b',
+        fill: '#facc15',
         stroke: '#ffffff',
         strokeWidth: 1.5,
         originX: 'center',
@@ -1182,6 +1237,9 @@
         segIndex: i,
         isMidpoint: true
       });
+      midHandle.origMidX = midX;
+      midHandle.origMidY = midY;
+
       activeControlHandles.push(midHandle);
       canvas.add(midHandle);
       midHandle.bringToFront();
@@ -1190,24 +1248,58 @@
   }
 
   function updateTacticalGroupFromPoints(groupObj) {
+    if (!groupObj || !groupObj.controlPoints) return;
     const pts = groupObj.controlPoints;
     const pat = groupObj.linePattern || currentPattern;
     const clr = groupObj.lineColor || currentColor;
     const end = groupObj.lineEnding || currentEnding;
 
-    const newGroup = buildTrajectoryGroup(pts, pat, clr, end);
+    const { svg, dots } = generateHockeyTacticalSVG(pts, pat);
+    const lineObj = new fabric.Path(svg, {
+      stroke: clr,
+      strokeWidth: (pat === 'pucks_line') ? Math.round(5 * globalObjectScale) : strokeWidth,
+      strokeDashArray: getStrokeDashForPattern(pat),
+      fill: 'transparent',
+      strokeLineCap: 'round',
+      strokeLineJoin: 'round'
+    });
 
-    const oldIndex = canvas.getObjects().indexOf(groupObj);
-    canvas.remove(groupObj);
+    const items = [lineObj];
+    dots.forEach(d => {
+      items.push(new fabric.Circle({
+        left: d.x, top: d.y, radius: 2.6 * globalObjectScale, fill: clr, originX: 'center', originY: 'center'
+      }));
+    });
 
-    if (oldIndex > -1) {
-      canvas.insertAt(newGroup, oldIndex, false);
-    } else {
-      canvas.add(newGroup);
+    const finePts = getSampledCurvePoints(pts);
+    const pLast = finePts[finePts.length - 1];
+    const pPrev = finePts[Math.max(0, finePts.length - 3)] || finePts[0];
+    const angle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x) * (180 / Math.PI);
+
+    const prevEnding = currentEnding;
+    const prevColor = currentColor;
+    currentEnding = end;
+    currentColor = clr;
+    const marker = createTacticalEnding(pLast.x, pLast.y, angle);
+    currentEnding = prevEnding;
+    currentColor = prevColor;
+
+    if (marker) items.push(marker);
+
+    while (groupObj.size() > 0) {
+      groupObj.remove(groupObj.item(0));
     }
+    items.forEach(it => groupObj.addWithUpdate(it));
+    groupObj.set({
+      hasControls: false,
+      hasBorders: false
+    });
+    groupObj.setCoords();
 
-    activeControlLine = newGroup;
-    activeControlHandles.forEach(h => h.bringToFront());
+    if (draggingMidData) {
+      if (draggingMidData.fixedDot) draggingMidData.fixedDot.bringToFront();
+      if (draggingMidData.guideLine) canvas.bringToFront(draggingMidData.guideLine);
+    }
     canvas.requestRenderAll();
   }
 
@@ -1399,9 +1491,9 @@
   window.addEventListener('resize', resizeCanvasToFit);
   window.addEventListener('orientationchange', () => setTimeout(resizeCanvasToFit, 200));
 
-  window.addEventListener('DOMContentLoaded', () => {
+  window.addEventListener('DOMContentLoaded', async () => {
     drawFullIce();
-    renderCustomBgsSelect();
+    await renderCustomBgsSelect();
     setupCanvasEvents();
     setupKeyEvents();
     setupModalOverlayCloseEvents();
@@ -1568,14 +1660,10 @@
     else if (type === 'neutral_zone') drawNeutralZoneIce();
   }
 
-  function getCustomBgs() {
-    return JSON.parse(localStorage.getItem('hockey_custom_bgs') || '[]');
-  }
-
-  function renderCustomBgsSelect(selectedId = null) {
+  async function renderCustomBgsSelect(selectedId = null) {
     const select = document.getElementById('customBgSelect');
     if (!select) return;
-    const bgs = getCustomBgs();
+    const bgs = await getCustomBgs();
 
     select.innerHTML = '<option value="">-- Выберите свой фон --</option>';
     bgs.forEach(bg => {
@@ -1608,29 +1696,29 @@
     });
   }
 
-  function applyCustomBgFromSelect(id) {
+  async function applyCustomBgFromSelect(id) {
     if (!id) return;
-    const bgs = getCustomBgs();
+    const bgs = await getCustomBgs();
     const bg = bgs.find(b => b.id == id);
     if (!bg) return;
     applyCustomBgImage(bg.data, bg.isHalf);
     closeContextPopover();
   }
 
-  function deleteSelectedCustomBg() {
+  async function deleteSelectedCustomBg() {
     const select = document.getElementById('customBgSelect');
     if (!select || !select.value) {
       alert('Сначала выберите фон из списка для удаления.');
       return;
     }
     const id = select.value;
-    let bgs = getCustomBgs();
+    let bgs = await getCustomBgs();
     const target = bgs.find(b => b.id == id);
     if (!confirm(`Удалить фон «${target ? target.name : ''}» из списка?`)) return;
 
     bgs = bgs.filter(b => b.id != id);
-    localStorage.setItem('hockey_custom_bgs', JSON.stringify(bgs));
-    renderCustomBgsSelect();
+    await saveCustomBgs(bgs);
+    await renderCustomBgsSelect();
     setRinkPreset('full');
   }
 
@@ -1641,30 +1729,30 @@
     reader.onload = function(f) {
       const dataUrl = f.target.result;
       const img = new Image();
-      img.onload = function() {
+      img.onload = async function() {
         const isHalf = (img.width / img.height < 1.4);
-        const defaultName = file.name.replace(/\.[^/.]+$/, '') || `Фон льда ${getCustomBgs().length + 1}`;
+        const existingBgs = await getCustomBgs();
+        const defaultName = file.name.replace(/\.[^/.]+$/, '') || `Фон льда ${existingBgs.length + 1}`;
         const bgName = prompt('Введите название для сохранения этого фона:', defaultName);
         if (!bgName) {
           e.target.value = '';
           return;
         }
 
-        const bgs = getCustomBgs();
         const newBg = {
           id: Date.now(),
           name: bgName.trim(),
           data: dataUrl,
           isHalf: isHalf
         };
-        bgs.push(newBg);
+        existingBgs.push(newBg);
         try {
-          localStorage.setItem('hockey_custom_bgs', JSON.stringify(bgs));
+          await saveCustomBgs(existingBgs);
         } catch (err) {
-          alert('Не удалось сохранить в память браузера (превышен лимит размера изображения). Картинка будет использована без сохранения в список.');
+          console.warn('Ошибка IndexedDB при записи фона:', err);
         }
 
-        renderCustomBgsSelect(newBg.id);
+        await renderCustomBgsSelect(newBg.id);
         applyCustomBgImage(dataUrl, isHalf);
         e.target.value = '';
       };
@@ -1968,19 +2056,79 @@
     return { pt: points[points.length - 1], tangent: { nx: 0, ny: 0, dx: 1, dy: 0 } };
   }
 
-  function generateHockeyTacticalSVG(points, pattern) {
-    if (points.length < 2) return { svg: '', dots: [] };
+  // Расчёт точек гладкой дуги (Bezier spline interpolation)
+  function getSampledCurvePoints(rawPts) {
+    if (!rawPts || rawPts.length < 2) return rawPts || [];
+    if (rawPts.length === 2) return rawPts;
+
+    // Для 3 контрольных точек (начало, вершина изгиба, конец) строим квадратичную кривую Безье
+    if (rawPts.length === 3) {
+      const p0 = rawPts[0];
+      const p1 = rawPts[1];
+      const p2 = rawPts[2];
+      const steps = 60;
+      const sampled = [];
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const x = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x;
+        const y = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y;
+        sampled.push({ x, y });
+      }
+      return sampled;
+    }
+
+    // Для произвольного числа точек используем сглаженный Catmull-Rom / сглаживающий сплайн
+    const stepsPerSeg = 24;
+    const sampled = [];
+
+    for (let i = 0; i < rawPts.length - 1; i++) {
+      const p0 = rawPts[Math.max(0, i - 1)];
+      const p1 = rawPts[i];
+      const p2 = rawPts[i + 1];
+      const p3 = rawPts[Math.min(rawPts.length - 1, i + 2)];
+
+      for (let s = 0; s < stepsPerSeg; s++) {
+        const t = s / stepsPerSeg;
+        const t2 = t * t;
+        const t3 = t2 * t;
+
+        const x = 0.5 * ((2 * p1.x) +
+          (-p0.x + p2.x) * t +
+          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+
+        const y = 0.5 * ((2 * p1.y) +
+          (-p0.y + p2.y) * t +
+          (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+          (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+
+        sampled.push({ x, y });
+      }
+    }
+    sampled.push(rawPts[rawPts.length - 1]);
+    return sampled;
+  }
+
+  function generateHockeyTacticalSVG(controlPoints, pattern) {
+    if (controlPoints.length < 2) return { svg: '', dots: [] };
+
+    // Точки вдоль гладкой дуги
+    const points = (controlPoints.length > 2) ? getSampledCurvePoints(controlPoints) : controlPoints;
     const { totalLen, segLens } = getPolylineMetrics(points);
     if (totalLen < 5) return { svg: `M ${points[0].x} ${points[0].y} L ${points[points.length-1].x} ${points[points.length-1].y}`, dots: [] };
 
     if (pattern === 'forward') {
-      return { svg: generateSmoothSVGPath(points), dots: [] };
+      let svg = '';
+      for (let i = 0; i < points.length; i++) {
+        svg += (i === 0) ? `M ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} ` : `L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} `;
+      }
+      return { svg, dots: [] };
     }
 
     if (pattern === 'forward_puck') {
       const wavelength = 18 * globalObjectScale;
       const amplitude = 5.5 * globalObjectScale;
-      const steps = Math.max(12, Math.floor(totalLen / 2));
+      const steps = Math.max(16, Math.floor(totalLen / 2));
       let svg = '';
       for (let s = 0; s <= steps; s++) {
         const d = (s / steps) * totalLen;
@@ -2036,7 +2184,10 @@
     }
 
     if (pattern === 'lateral') {
-      let svg = generateSmoothSVGPath(points);
+      let svg = '';
+      for (let i = 0; i < points.length; i++) {
+        svg += (i === 0) ? `M ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} ` : `L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} `;
+      }
       const stepDist = 9 * globalObjectScale;
       const barLen = 5.5 * globalObjectScale;
       for (let d = 4; d < totalLen - 4; d += stepDist) {
@@ -2070,7 +2221,7 @@
 
     if (pattern === 'shooting') {
       const gap = 3 * globalObjectScale;
-      const steps = Math.max(10, Math.floor(totalLen / 4));
+      const steps = Math.max(14, Math.floor(totalLen / 3));
       let line1 = '', line2 = '';
       for (let s = 0; s <= steps; s++) {
         const d = (s / steps) * totalLen;
@@ -2085,26 +2236,15 @@
       return { svg: line1 + line2, dots: [] };
     }
 
-    return { svg: generateSmoothSVGPath(points), dots: [] };
-  }
+    if (pattern === 'passing' || pattern === 'pucks_line') {
+      let svg = '';
+      for (let i = 0; i < points.length; i++) {
+        svg += (i === 0) ? `M ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} ` : `L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} `;
+      }
+      return { svg, dots: [] };
+    }
 
-  function generateSmoothSVGPath(rawPts) {
-    const pts = [rawPts[0]];
-    for (let i = 1; i < rawPts.length; i++) {
-      const dist = Math.hypot(rawPts[i].x - pts[pts.length - 1].x, rawPts[i].y - pts[pts.length - 1].y);
-      if (dist > 4) pts.push(rawPts[i]);
-    }
-    if (pts.length < 3) {
-      return `M ${rawPts[0].x} ${rawPts[0].y} L ${rawPts[rawPts.length-1].x} ${rawPts[rawPts.length-1].y}`;
-    }
-    let d = `M ${pts[0].x} ${pts[0].y} `;
-    for (let i = 1; i < pts.length - 1; i++) {
-      const midX = (pts[i].x + pts[i + 1].x) / 2;
-      const midY = (pts[i].y + pts[i + 1].y) / 2;
-      d += `Q ${pts[i].x} ${pts[i].y}, ${midX} ${midY} `;
-    }
-    d += `L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
-    return d;
+    return { svg: generateSmoothSVGPath(controlPoints), dots: [] };
   }
 
   function createTacticalEnding(x, y, angle) {
@@ -2233,15 +2373,60 @@
         const pointer = { x: target.left, y: target.top };
 
         if (target.isMidpoint) {
-          const insertIdx = target.segIndex + 1;
-          activeControlLine.controlPoints.splice(insertIdx, 0, pointer);
-          updateTacticalGroupFromPoints(activeControlLine);
-          renderLineHandles(activeControlLine);
+          if (!draggingMidData || draggingMidData.handle !== target) {
+            const insertIdx = target.segIndex + 1;
+            const origX = target.origMidX || target.left;
+            const origY = target.origMidY || target.top;
 
-          const newVertexHandle = activeControlHandles.find(h => !h.isMidpoint && h.pointIndex === insertIdx);
-          if (newVertexHandle) {
-            canvas.setActiveObject(newVertexHandle);
+            const fixedDot = new fabric.Circle({
+              left: origX,
+              top: origY,
+              radius: 5 * globalObjectScale,
+              fill: '#ea580c',
+              stroke: '#ffffff',
+              strokeWidth: 1.5,
+              originX: 'center',
+              originY: 'center',
+              selectable: false,
+              evented: false,
+              isControlHandle: true
+            });
+
+            const guideLine = new fabric.Line([origX, origY, pointer.x, pointer.y], {
+              stroke: '#94a3b8',
+              strokeWidth: 1.5,
+              strokeDashArray: [4, 3],
+              opacity: 0.65,
+              selectable: false,
+              evented: false,
+              isControlHandle: true
+            });
+
+            canvas.add(fixedDot);
+            canvas.add(guideLine);
+            fixedDot.bringToFront();
+            canvas.bringToFront(guideLine);
+
+            activeControlLine.controlPoints.splice(insertIdx, 0, pointer);
+
+            draggingMidData = {
+              handle: target,
+              insertIdx: insertIdx,
+              fixedDot: fixedDot,
+              guideLine: guideLine,
+              origX: origX,
+              origY: origY
+            };
+          } else {
+            activeControlLine.controlPoints[draggingMidData.insertIdx] = pointer;
+            draggingMidData.guideLine.set({
+              x2: pointer.x,
+              y2: pointer.y
+            });
+            draggingMidData.guideLine.setCoords();
           }
+
+          updateTacticalGroupFromPoints(activeControlLine);
         } else {
           activeControlLine.controlPoints[target.pointIndex] = pointer;
           updateTacticalGroupFromPoints(activeControlLine);
@@ -2249,11 +2434,14 @@
           activeControlHandles.forEach(h => {
             if (h.isMidpoint) {
               const pts = activeControlLine.controlPoints;
-              h.set({
-                left: (pts[h.segIndex].x + pts[h.segIndex + 1].x) / 2,
-                top: (pts[h.segIndex].y + pts[h.segIndex + 1].y) / 2
-              });
-              h.setCoords();
+              if (pts[h.segIndex] && pts[h.segIndex + 1]) {
+                const mx = (pts[h.segIndex].x + pts[h.segIndex + 1].x) / 2;
+                const my = (pts[h.segIndex].y + pts[h.segIndex + 1].y) / 2;
+                h.set({ left: mx, top: my });
+                h.origMidX = mx;
+                h.origMidY = my;
+                h.setCoords();
+              }
             }
           });
         }
@@ -2266,10 +2454,20 @@
         opt.target.lastLeft = opt.target.left;
         opt.target.lastTop = opt.target.top;
       }
+      if (opt.target && opt.target.isMidpoint) {
+        opt.target.origMidX = opt.target.left;
+        opt.target.origMidY = opt.target.top;
+      }
     });
 
     canvas.on('object:modified', (e) => {
       if (e.target && (e.target.isControlHandle || e.target.controlPoints)) {
+        if (draggingMidData) {
+          if (draggingMidData.fixedDot) canvas.remove(draggingMidData.fixedDot);
+          if (draggingMidData.guideLine) canvas.remove(draggingMidData.guideLine);
+          draggingMidData = null;
+          renderLineHandles(activeControlLine);
+        }
         saveState();
       }
     });
@@ -2296,14 +2494,11 @@
     canvas.on('mouse:down', (opt) => {
       const p = canvas.getPointer(opt.e);
 
-      // Если кликнули по контрольной ручке — не перебиваем перемещение
       if (opt.target && opt.target.isControlHandle) {
         return;
       }
 
-      // Если кликнули по уже существующему объекту (появился курсор перемещения) —
-      // перемещаем этот объект и не создаем поверх него новые элементы
-      const isOverSelectableObject = opt.target && opt.target.name !== 'rink_bg' && opt.target !== tracingObject;
+      const isOverSelectableObject = opt.target && opt.target.name !== 'rink_bg' && opt.target !== tracingObject && !opt.target.isControlHandle;
 
       if (currentTool === 'placement') {
         if (isOverSelectableObject) {
@@ -2317,7 +2512,7 @@
       }
 
       if (currentTool === 'eraser') {
-        if (opt.target && opt.target.name !== 'rink_bg' && opt.target !== tracingObject) {
+        if (opt.target && opt.target.name !== 'rink_bg' && opt.target !== tracingObject && !opt.target.isControlHandle) {
           const removedRole = opt.target.playerRole;
           canvas.remove(opt.target);
           if (removedRole) renumberPlayers(removedRole);
@@ -2326,7 +2521,6 @@
         return;
       }
 
-      // Если активны кисть или стрелка, но клик пришёлся по объекту — позволяем его перемещать
       if ((currentTool === 'brush' || currentTool === 'straightArrow') && isOverSelectableObject) {
         canvas.setActiveObject(opt.target);
         canvas.requestRenderAll();
@@ -2413,7 +2607,8 @@
 
           const group = new fabric.Group(items, {
             selectable: (currentTool === 'select'),
-            hasControls: true,
+            hasControls: false,
+            hasBorders: false,
             customType: 'tactical_trajectory'
           });
           canvas.add(group);
@@ -2442,7 +2637,7 @@
     let rolesToRenumber = new Set();
 
     activeObjects.forEach(obj => {
-      if (obj && !obj.isEditing && obj.name !== 'rink_bg') {
+      if (obj && !obj.isEditing && obj.name !== 'rink_bg' && !obj.isControlHandle) {
         if (obj === tracingObject) {
           removeTracing();
         } else {
@@ -2506,9 +2701,13 @@
     canvas.selection = (tool === 'select');
     canvas.discardActiveObject();
     canvas.forEachObject(obj => {
-      if (obj.name !== 'rink_bg' && obj !== tracingObject) {
+      if (obj.name !== 'rink_bg' && obj !== tracingObject && !obj.isControlHandle) {
         obj.selectable = (tool === 'select');
-        obj.evented = true; // разрешаем события касания и кликов для быстрого перемещения
+        obj.evented = true;
+        if (obj.customType === 'tactical_trajectory') {
+          obj.hasControls = false;
+          obj.hasBorders = false;
+        }
       }
     });
 
@@ -2549,9 +2748,21 @@
     if (btnRedo) btnRedo.disabled = (redoHistory.length === 0);
   }
 
+  function getCleanCanvasJSON() {
+    const objects = canvas.getObjects().filter(obj => !obj.isControlHandle);
+    const canvasData = {
+      objects: objects.map(obj => obj.toObject([
+        'name', 'customType', 'playerRole', 'playerNumber', 
+        'isStampMode', 'controlPoints', 'linePattern', 'lineColor', 'lineEnding'
+      ])),
+      background: canvas.backgroundColor
+    };
+    return JSON.stringify(canvasData);
+  }
+
   function saveState() {
     if (isStateChanging) return;
-    const jsonState = JSON.stringify(canvas.toJSON(['name', 'customType', 'playerRole', 'playerNumber', 'isStampMode']));
+    const jsonState = getCleanCanvasJSON();
 
     if (undoHistory.length > 0 && undoHistory[undoHistory.length - 1] === jsonState) {
       return;
@@ -2567,11 +2778,18 @@
   function undo() {
     if (undoHistory.length > 1) {
       isStateChanging = true;
+      clearLineHandles();
       const currentState = undoHistory.pop();
       redoHistory.push(currentState);
 
       const prevState = undoHistory[undoHistory.length - 1];
       canvas.loadFromJSON(prevState, () => {
+        canvas.forEachObject(obj => {
+          if (obj.customType === 'tactical_trajectory') {
+            obj.hasControls = false;
+            obj.hasBorders = false;
+          }
+        });
         lockBackgroundObjects();
         resizeCanvasToFit();
         canvas.renderAll();
@@ -2584,10 +2802,17 @@
   function redo() {
     if (redoHistory.length > 0) {
       isStateChanging = true;
+      clearLineHandles();
       const nextState = redoHistory.pop();
       undoHistory.push(nextState);
 
       canvas.loadFromJSON(nextState, () => {
+        canvas.forEachObject(obj => {
+          if (obj.customType === 'tactical_trajectory') {
+            obj.hasControls = false;
+            obj.hasBorders = false;
+          }
+        });
         lockBackgroundObjects();
         resizeCanvasToFit();
         canvas.renderAll();
@@ -2599,6 +2824,7 @@
 
   function clearCanvas() {
     if (confirm('Очистить планшет? Все расставленные элементы пропадут.')) {
+      clearLineHandles();
       if (currentRinkType === 'half') drawHalfIce();
       else if (currentRinkType === 'neutral_zone') drawNeutralZoneIce();
       else drawFullIce();
@@ -2607,6 +2833,7 @@
 
   function exportImage() {
     canvas.discardActiveObject();
+    clearLineHandles();
     const tracingWasVisible = tracingObject && tracingObject.visible;
     if (tracingObject) tracingObject.visible = false;
 
@@ -2629,17 +2856,22 @@
     link.click();
   }
 
-  function saveToLibrary() {
-    const title = prompt('Введите название схемы:', 'Упражнение №' + (getDrills().length + 1));
+  async function saveToLibrary() {
+    const drills = await getDrills();
+    const title = prompt('Введите название схемы:', 'Упражнение №' + (drills.length + 1));
     if (!title) return;
 
+    clearLineHandles();
     const tracingWasVisible = tracingObject && tracingObject.visible;
     if (tracingObject) tracingObject.visible = false;
     canvas.discardActiveObject();
 
-    const canvasObjectsToSave = canvas.getObjects().filter(obj => obj !== tracingObject && obj.name !== 'rink_bg');
+    const canvasObjectsToSave = canvas.getObjects().filter(obj => obj !== tracingObject && obj.name !== 'rink_bg' && !obj.isControlHandle);
     const canvasData = {
-      objects: canvasObjectsToSave.map(obj => obj.toObject(['name', 'customType', 'playerRole', 'playerNumber', 'isStampMode'])),
+      objects: canvasObjectsToSave.map(obj => obj.toObject([
+        'name', 'customType', 'playerRole', 'playerNumber', 
+        'isStampMode', 'controlPoints', 'linePattern', 'lineColor', 'lineEnding'
+      ])),
       background: canvas.backgroundColor
     };
     const json = JSON.stringify(canvasData);
@@ -2658,7 +2890,6 @@
 
     resizeCanvasToFit();
 
-    const drills = getDrills();
     let finalTitle = title;
     let duplicateCount = 0;
     drills.forEach(d => {
@@ -2682,12 +2913,13 @@
       rinkType: currentRinkType,
       aspectRatio: currentVirtualWidth / VIRTUAL_HEIGHT
     });
-    localStorage.setItem('hockey_pro_drills', JSON.stringify(drills));
+
+    await saveDrills(drills);
     alert(`Схема сохранена как «${finalTitle}»!`);
   }
 
   async function exportDatabaseJSON() {
-    const drills = getDrills();
+    const drills = await getDrills();
     if (drills.length === 0) {
       alert('У вас пока нет сохраненных упражнений для экспорта.');
       return;
@@ -2721,7 +2953,7 @@
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(event) {
+    reader.onload = async function(event) {
       try {
         const importedDrills = JSON.parse(event.target.result);
         if (!Array.isArray(importedDrills)) {
@@ -2729,7 +2961,7 @@
           return;
         }
 
-        const currentDrills = getDrills();
+        const currentDrills = await getDrills();
         const existingIds = new Set(currentDrills.map(d => d.id));
         const existingTitles = new Set(currentDrills.map(d => d.title));
         let addedCount = 0;
@@ -2759,7 +2991,7 @@
           addedCount++;
         });
 
-        localStorage.setItem('hockey_pro_drills', JSON.stringify(finalDrills));
+        await saveDrills(finalDrills);
         alert(`Импорт завершен! Автоматически добавлено упражнений: ${addedCount}`);
         e.target.value = '';
       } catch (err) {
@@ -2774,7 +3006,7 @@
     if (!files || files.length === 0) return;
 
     let addedCount = 0;
-    const drills = getDrills();
+    const drills = await getDrills();
     const existingTitles = new Set(drills.map(d => d.title));
 
     for (const file of files) {
@@ -2792,8 +3024,8 @@
       existingTitles.add(title);
 
       try {
-        const fullImgData = await readFileAsDataURLAsync(file);
-        const { thumbData, isHalf, aspectRatio } = await processImageMetricsAsync(fullImgData);
+        const rawDataUrl = await readFileAsDataURLAsync(file);
+        const { thumbData, optimizedImage, isHalf, aspectRatio } = await processImageMetricsAsync(rawDataUrl);
 
         const now = Date.now() + Math.floor(Math.random() * 10000);
         drills.push({
@@ -2801,7 +3033,7 @@
           createdAt: now,
           title: title,
           thumb: thumbData,
-          fullImage: fullImgData,
+          fullImage: optimizedImage,
           data: null,
           isUploadedImage: true,
           isHalfRink: isHalf,
@@ -2810,12 +3042,17 @@
 
         addedCount++;
       } catch (err) {
-        console.error("Ошибка загрузки файла:", file.name, err);
+        alert(`Ошибка при обработке файла "${file.name}": ${err.message}`);
       }
     }
 
-    localStorage.setItem('hockey_pro_drills', JSON.stringify(drills));
-    alert(`Успешно загружено схем с ПК: ${addedCount}`);
+    try {
+      await saveDrills(drills);
+      alert(`Успешно загружено схем с ПК: ${addedCount}`);
+    } catch (quotaErr) {
+      alert("Ошибка сохранения в IndexedDB: " + quotaErr.message);
+    }
+
     e.target.value = '';
   }
 
@@ -2840,22 +3077,34 @@
         const th = tw / aspect || 130;
         thumbCanvas.width = tw;
         thumbCanvas.height = th;
-        const ctx = thumbCanvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, tw, th);
+        const tCtx = thumbCanvas.getContext('2d');
+        tCtx.drawImage(img, 0, 0, tw, th);
         const thumbData = thumbCanvas.toDataURL('image/jpeg', 0.7);
 
-        resolve({ thumbData, isHalf, aspectRatio: aspect });
+        const optCanvas = document.createElement('canvas');
+        const maxDim = 1400;
+        let ow = img.width;
+        let oh = img.height;
+        if (ow > maxDim || oh > maxDim) {
+          if (ow > oh) {
+            oh = Math.round((oh * maxDim) / ow);
+            ow = maxDim;
+          } else {
+            ow = Math.round((ow * maxDim) / oh);
+            oh = maxDim;
+          }
+        }
+        optCanvas.width = ow;
+        optCanvas.height = oh;
+        const oCtx = optCanvas.getContext('2d');
+        oCtx.drawImage(img, 0, 0, ow, oh);
+        const optimizedImage = optCanvas.toDataURL('image/jpeg', 0.85);
+
+        resolve({ thumbData, optimizedImage, isHalf, aspectRatio: aspect });
       };
+      img.onerror = () => reject(new Error("Не удалось прочитать изображение"));
       img.src = dataUrl;
     });
-  }
-
-  function getDrills() {
-    const raw = JSON.parse(localStorage.getItem('hockey_pro_drills') || '[]');
-    raw.forEach(d => {
-      if (!d.createdAt) d.createdAt = d.id || 0;
-    });
-    return raw;
   }
 
   function sortDrillsArray(arr, sortType) {
@@ -2869,11 +3118,11 @@
     return arr;
   }
 
-  function openHistoryModal() {
+  async function openHistoryModal() {
     const modal = document.getElementById('historyModal');
     const searchInput = document.getElementById('librarySearchInput');
     if (searchInput) searchInput.value = '';
-    renderLibraryModalGrid();
+    await renderLibraryModalGrid();
     if (modal) modal.style.display = 'flex';
   }
 
@@ -2882,7 +3131,7 @@
     if (modal) modal.style.display = 'none';
   }
 
-  function renderLibraryModalGrid() {
+  async function renderLibraryModalGrid() {
     const list = document.getElementById('savedDrillsList');
     const searchInput = document.getElementById('librarySearchInput');
     const sortSelect = document.getElementById('librarySortSelect');
@@ -2890,7 +3139,7 @@
     const sortType = sortSelect ? sortSelect.value : 'newest';
 
     list.innerHTML = '';
-    let drills = getDrills();
+    let drills = await getDrills();
 
     if (query) {
       drills = drills.filter(d => d.title.toLowerCase().includes(query));
@@ -2933,8 +3182,8 @@
     document.getElementById('imagePreviewModal').style.display = 'none';
   }
 
-  function renameDrill(id) {
-    let drills = getDrills();
+  async function renameDrill(id) {
+    let drills = await getDrills();
     const drill = drills.find(item => item.id === id);
     if (!drill) return;
 
@@ -2942,24 +3191,26 @@
     if (!newTitle || !newTitle.trim()) return;
 
     drill.title = newTitle.trim();
-    localStorage.setItem('hockey_pro_drills', JSON.stringify(drills));
-    renderLibraryModalGrid();
+    await saveDrills(drills);
+    await renderLibraryModalGrid();
   }
 
-  function deleteDrillFromLibrary(id) {
+  async function deleteDrillFromLibrary(id) {
     if (!confirm('Удалить эту схему из библиотеки?')) return;
-    let drills = getDrills();
+    let drills = await getDrills();
     drills = drills.filter(d => d.id !== id);
-    localStorage.setItem('hockey_pro_drills', JSON.stringify(drills));
-    renderLibraryModalGrid();
+    await saveDrills(drills);
+    await renderLibraryModalGrid();
   }
 
-  function loadDrill(id) {
-    const d = getDrills().find(item => item.id === id);
+  async function loadDrill(id) {
+    const drills = await getDrills();
+    const d = drills.find(item => item.id === id);
     if (!d) return;
 
     const loadAndRender = (canvasData) => {
       canvas.clear();
+      clearLineHandles();
       const rType = d.rinkType || (d.isHalfRink ? 'half' : 'full');
       currentRinkType = rType;
       currentVirtualWidth = (rType === 'full') ? VIRTUAL_WIDTH_FULL : VIRTUAL_WIDTH_HALF;
@@ -2975,6 +3226,10 @@
       if (canvasData && canvasData.objects) {
         fabric.util.enlivenObjects(canvasData.objects, (enlivenedObjects) => {
           enlivenedObjects.forEach(obj => {
+            if (obj.customType === 'tactical_trajectory') {
+              obj.hasControls = false;
+              obj.hasBorders = false;
+            }
             canvas.add(obj);
           });
           lockBackgroundObjects();
@@ -3257,7 +3512,7 @@
     renderWorkoutSelectableGrid();
   }
 
-  function renderWorkoutSelectableGrid() {
+  async function renderWorkoutSelectableGrid() {
     const grid = document.getElementById('workoutSelectableGrid');
     const searchInput = document.getElementById('drillSearchInput');
     const sortSelect = document.getElementById('workoutSortSelect');
@@ -3265,7 +3520,7 @@
     const sortType = sortSelect ? sortSelect.value : 'newest';
 
     grid.innerHTML = '';
-    let drills = getDrills();
+    let drills = await getDrills();
 
     if (query) {
       drills = drills.filter(d => d.title.toLowerCase().includes(query));
@@ -3297,7 +3552,7 @@
       grid.appendChild(card);
     });
 
-    refreshSelectionBadges();
+    await refreshSelectionBadges();
   }
 
   function renderSelectedQueue() {
@@ -3353,9 +3608,9 @@
     updateSelectedCount();
   }
 
-  function toggleDrillSelection(id, e) {
+  async function toggleDrillSelection(id, e) {
     e.stopPropagation();
-    const drills = getDrills();
+    const drills = await getDrills();
     const target = drills.find(d => d.id === id);
     if (!target) return;
 
@@ -3367,12 +3622,12 @@
     }
 
     renderSelectedQueue();
-    refreshSelectionBadges();
+    await refreshSelectionBadges();
     updateSelectedCount();
   }
 
-  function refreshSelectionBadges() {
-    const drills = getDrills();
+  async function refreshSelectionBadges() {
+    const drills = await getDrills();
     drills.forEach(d => {
       const badge = document.getElementById(`badge_order_${d.id}`);
       const btnPlus = document.getElementById(`btn_plus_${d.id}`);
