@@ -191,6 +191,33 @@
       transform: scale(1.15);
     }
 
+    /* ТУМБЛЕР РЕЖИМА ИГРОКОВ */
+    .toggle-switch-container {
+      display: flex;
+      background: #090e17;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 2px;
+      margin-bottom: 6px;
+      gap: 2px;
+    }
+    .toggle-switch-btn {
+      flex: 1;
+      padding: 4px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      border-radius: 4px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      justify-content: center;
+      transition: all 0.15s ease;
+    }
+    .toggle-switch-btn.active {
+      background: #0284c7;
+      color: #fff;
+    }
+
     /* ОБЛАСТЬ ХОЛСТА */
     .canvas-container-outer {
       flex: 1;
@@ -310,7 +337,7 @@
     #globalPopoverMenu.mode-android-popover {
       border-radius: 10px;
       padding: 10px;
-      min-width: 220px;
+      min-width: 230px;
       white-space: nowrap;
     }
     #globalPopoverMenu.mode-android-popover.active {
@@ -713,7 +740,7 @@
       <i class="ph-bold ph-file-arrow-up"></i>
     </button>
 
-    <button id="btnDeleteSelected" class="btn-danger" onclick="deleteActiveObject()" title="Удалить выбранное"><i class="ph ph-trash"></i></button>
+    <button id="btnDeleteSelected" class="btn-danger" onclick="deleteActiveObject()" title="Удалить выбранное (Delete)"><i class="ph ph-trash"></i></button>
     <button id="btnOpenHistory" onclick="openHistoryModal()"><i class="ph ph-folder"></i> Схемы</button>
     
     <input type="file" id="uploadDrillImageInput" accept="image/png, image/jpeg, image/jpg, image/webp" multiple style="display:none;" onchange="handleMultipleDrillsUpload(event)">
@@ -743,11 +770,23 @@
         <div class="tools-grid">
           <button id="btnFullRink" class="active" onclick="setRinkPreset('full'); closeContextPopover();">Всё поле</button>
           <button id="btnHalfRink" onclick="setRinkPreset('half'); closeContextPopover();">1/2 Поля</button>
+          <button id="btnNeutralZone" style="grid-column: span 2;" onclick="setRinkPreset('neutral_zone'); closeContextPopover();">Средняя зона</button>
         </div>
         <input type="file" id="bgUpload" accept="image/*" style="display:none" onchange="uploadCustomBg(event); closeContextPopover();">
         <button style="width: 100%; margin-top: 5px;" onclick="document.getElementById('bgUpload').click()">
-          <i class="ph ph-upload-simple"></i> Загрузить фото льда
+          <i class="ph ph-upload-simple"></i> + Загрузить своё фото льда
         </button>
+        <div id="customBgsContainer" style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 600;">Сохранённые фото льда:</div>
+          <div style="display: flex; gap: 4px;">
+            <select id="customBgSelect" class="select-sort-box" style="flex: 1; font-size: 11px; padding: 4px 6px;" onchange="applyCustomBgFromSelect(this.value)">
+              <option value="">-- Выберите свой фон --</option>
+            </select>
+            <button class="btn-danger" style="padding: 4px 7px;" onclick="deleteSelectedCustomBg()" title="Удалить выбранный фон">
+              <i class="ph ph-trash"></i>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -830,9 +869,20 @@
       <button class="sidebar-group-trigger" onclick="toggleSidebarGroup('grpEquipment', event)"><i class="ph ph-users-three"></i> Инвентарь</button>
       <div class="sidebar-group-content" data-for="grpEquipment">
         <div class="section-title">Игроки и инвентарь</div>
+        
+        <!-- ТУМБЛЕР ВАРИАЦИЙ ИГРОКОВ -->
+        <div class="toggle-switch-container" title="Переключение режима нумерации">
+          <button id="playerModeStamp" class="toggle-switch-btn active" onclick="setPlayerStampMode('stamp'); event.stopPropagation();">
+            Авто № (1, 2..)
+          </button>
+          <button id="playerModeCustom" class="toggle-switch-btn" onclick="setPlayerStampMode('custom'); event.stopPropagation();">
+            Свой текст (F, D..)
+          </button>
+        </div>
+
         <div class="tools-grid">
-          <button id="btnPlaceF" class="place-btn" onclick="preparePlacement('player', {role:'F', color:'#dc2626'}, this); closeContextPopover();">Атака F</button>
-          <button id="btnPlaceD" class="place-btn" onclick="preparePlacement('player', {role:'D', color:'#2563eb'}, this); closeContextPopover();">Защита D</button>
+          <button id="btnPlaceF" class="place-btn" onclick="preparePlacement('player', {role:'F'}, this); closeContextPopover();">Атака F</button>
+          <button id="btnPlaceD" class="place-btn" onclick="preparePlacement('player', {role:'D'}, this); closeContextPopover();">Защита D</button>
           <button id="btnPlaceG" class="place-btn" onclick="preparePlacement('player', {role:'G', color:'#16a34a'}, this); closeContextPopover();">Вратарь G</button>
           <button id="btnPlaceCoach" class="place-btn" onclick="preparePlacement('coach', {}, this); closeContextPopover();">Тренер (C)</button>
           <button id="btnPlaceCross" class="place-btn" onclick="preparePlacement('cross', {}, this); closeContextPopover();">Крестик (✕)</button>
@@ -995,6 +1045,8 @@
   let strokeWidth = 3;
   let currentRinkType = 'full';
 
+  let playerStampMode = 'stamp';
+
   let globalObjectScale = 1.0;
 
   let undoHistory = [];
@@ -1012,11 +1064,18 @@
   let tracingObject = null;
   let isTracingLocked = false;
 
-let currentActiveGroupId = null;
+  let currentActiveGroupId = null;
 
-  // Управление интерактивными точками-ручками для ломаных/дуг
   let activeControlLine = null;
   let activeControlHandles = [];
+
+  function setPlayerStampMode(mode) {
+    playerStampMode = mode;
+    const btnStamp = document.getElementById('playerModeStamp');
+    const btnCustom = document.getElementById('playerModeCustom');
+    if (btnStamp) btnStamp.classList.toggle('active', mode === 'stamp');
+    if (btnCustom) btnCustom.classList.toggle('active', mode === 'custom');
+  }
 
   function clearLineHandles() {
     if (activeControlHandles.length > 0) {
@@ -1027,70 +1086,7 @@ let currentActiveGroupId = null;
     canvas.requestRenderAll();
   }
 
-  function renderLineHandles(groupObj) {
-    clearLineHandles();
-    if (!groupObj || !groupObj.controlPoints || groupObj.controlPoints.length < 2) return;
-
-    activeControlLine = groupObj;
-    const pts = groupObj.controlPoints;
-
-    // Опорные вершины (начало, конец и уже изогнутые точки)
-    pts.forEach((pt, idx) => {
-      const handle = new fabric.Circle({
-        left: pt.x,
-        top: pt.y,
-        radius: 6 * globalObjectScale,
-        fill: '#38bdf8',
-        stroke: '#ffffff',
-        strokeWidth: 2,
-        originX: 'center',
-        originY: 'center',
-        hasControls: false,
-        hasBorders: false,
-        selectable: true,
-        isControlHandle: true,
-        pointIndex: idx,
-        isMidpoint: false
-      });
-      activeControlHandles.push(handle);
-      canvas.add(handle);
-      handle.bringToFront();
-    });
-
-    // Средние точки для выгибания каждого сегмента в дугу
-    for (let i = 0; i < pts.length - 1; i++) {
-      const midX = (pts[i].x + pts[i + 1].x) / 2;
-      const midY = (pts[i].y + pts[i + 1].y) / 2;
-
-      const midHandle = new fabric.Circle({
-        left: midX,
-        top: midY,
-        radius: 4.5 * globalObjectScale,
-        fill: '#f59e0b',
-        stroke: '#ffffff',
-        strokeWidth: 1.5,
-        originX: 'center',
-        originY: 'center',
-        hasControls: false,
-        hasBorders: false,
-        selectable: true,
-        isControlHandle: true,
-        segIndex: i,
-        isMidpoint: true
-      });
-      activeControlHandles.push(midHandle);
-      canvas.add(midHandle);
-      midHandle.bringToFront();
-    }
-    canvas.requestRenderAll();
-  }
-
-  function updateTacticalGroupFromPoints(groupObj) {
-    const pts = groupObj.controlPoints;
-    const pat = groupObj.linePattern || currentPattern;
-    const clr = groupObj.lineColor || currentColor;
-    const end = groupObj.lineEnding || currentEnding;
-
+  function buildTrajectoryGroup(pts, pat, clr, end) {
     const { svg, dots } = generateHockeyTacticalSVG(pts, pat);
     const lineObj = new fabric.Path(svg, {
       stroke: clr,
@@ -1111,8 +1107,7 @@ let currentActiveGroupId = null;
     const pLast = pts[pts.length - 1];
     const pPrev = pts[pts.length - 2] || pts[0];
     const angle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x) * (180 / Math.PI);
-    
-    // Временно выставляем текущие значения для генератора окончания
+
     const prevEnding = currentEnding;
     const prevColor = currentColor;
     currentEnding = end;
@@ -1123,12 +1118,96 @@ let currentActiveGroupId = null;
 
     if (marker) items.push(marker);
 
-    // Очищаем содержимое группы и перезаполняем новыми элементами
-    while (groupObj.size() > 0) {
-      groupObj.remove(groupObj.item(0));
+    const group = new fabric.Group(items, {
+      selectable: true,
+      hasControls: false,
+      hasBorders: false,
+      customType: 'tactical_trajectory',
+      controlPoints: pts.map(p => ({ x: p.x, y: p.y })),
+      linePattern: pat,
+      lineColor: clr,
+      lineEnding: end
+    });
+    return group;
+  }
+
+  function renderLineHandles(groupObj) {
+    clearLineHandles();
+    if (!groupObj || !groupObj.controlPoints || groupObj.controlPoints.length < 2) return;
+
+    activeControlLine = groupObj;
+    const pts = groupObj.controlPoints;
+
+    pts.forEach((pt, idx) => {
+      const handle = new fabric.Circle({
+        left: pt.x,
+        top: pt.y,
+        radius: 6 * globalObjectScale,
+        fill: '#38bdf8',
+        stroke: '#ffffff',
+        strokeWidth: 2,
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        selectable: true,
+        hoverCursor: 'move',
+        isControlHandle: true,
+        pointIndex: idx,
+        isMidpoint: false
+      });
+      activeControlHandles.push(handle);
+      canvas.add(handle);
+      handle.bringToFront();
+    });
+
+    for (let i = 0; i < pts.length - 1; i++) {
+      const midX = (pts[i].x + pts[i + 1].x) / 2;
+      const midY = (pts[i].y + pts[i + 1].y) / 2;
+
+      const midHandle = new fabric.Circle({
+        left: midX,
+        top: midY,
+        radius: 5 * globalObjectScale,
+        fill: '#f59e0b',
+        stroke: '#ffffff',
+        strokeWidth: 1.5,
+        originX: 'center',
+        originY: 'center',
+        hasControls: false,
+        hasBorders: false,
+        selectable: true,
+        hoverCursor: 'pointer',
+        isControlHandle: true,
+        segIndex: i,
+        isMidpoint: true
+      });
+      activeControlHandles.push(midHandle);
+      canvas.add(midHandle);
+      midHandle.bringToFront();
     }
-    items.forEach(it => groupObj.addWithUpdate(it));
-    groupObj.setCoords();
+    canvas.requestRenderAll();
+  }
+
+  function updateTacticalGroupFromPoints(groupObj) {
+    const pts = groupObj.controlPoints;
+    const pat = groupObj.linePattern || currentPattern;
+    const clr = groupObj.lineColor || currentColor;
+    const end = groupObj.lineEnding || currentEnding;
+
+    const newGroup = buildTrajectoryGroup(pts, pat, clr, end);
+
+    const oldIndex = canvas.getObjects().indexOf(groupObj);
+    canvas.remove(groupObj);
+
+    if (oldIndex > -1) {
+      canvas.insertAt(newGroup, oldIndex, false);
+    } else {
+      canvas.add(newGroup);
+    }
+
+    activeControlLine = newGroup;
+    activeControlHandles.forEach(h => h.bringToFront());
     canvas.requestRenderAll();
   }
 
@@ -1281,23 +1360,25 @@ let currentActiveGroupId = null;
     document.getElementById('objectScaleLabel').textContent = `${globalObjectScale.toFixed(1)}x`;
     strokeWidth = Math.max(1.5, Math.round(3 * globalObjectScale));
 
-    const activeObj = canvas.getActiveObject();
-    if (activeObj && activeObj.name !== 'rink_bg' && activeObj !== tracingObject) {
-      if (activeObj.type === 'group' && activeObj.customType === 'tactical_trajectory') {
-        activeObj.forEachObject(subObj => {
-          if (subObj.type === 'path' || subObj.type === 'line' || subObj.type === 'polyline') {
-            subObj.set('strokeWidth', strokeWidth);
-          }
-        });
-      } else {
-        activeObj.set({
-          scaleX: globalObjectScale,
-          scaleY: globalObjectScale
-        });
+    const activeObjs = canvas.getActiveObjects ? canvas.getActiveObjects() : [canvas.getActiveObject()];
+    activeObjs.forEach(activeObj => {
+      if (activeObj && activeObj.name !== 'rink_bg' && activeObj !== tracingObject) {
+        if (activeObj.type === 'group' && activeObj.customType === 'tactical_trajectory') {
+          activeObj.forEachObject(subObj => {
+            if (subObj.type === 'path' || subObj.type === 'line' || subObj.type === 'polyline') {
+              subObj.set('strokeWidth', strokeWidth);
+            }
+          });
+        } else {
+          activeObj.set({
+            scaleX: globalObjectScale,
+            scaleY: globalObjectScale
+          });
+        }
       }
-      canvas.requestRenderAll();
-      saveState();
-    }
+    });
+    canvas.requestRenderAll();
+    saveState();
   }
 
   function resizeCanvasToFit() {
@@ -1320,6 +1401,7 @@ let currentActiveGroupId = null;
 
   window.addEventListener('DOMContentLoaded', () => {
     drawFullIce();
+    renderCustomBgsSelect();
     setupCanvasEvents();
     setupKeyEvents();
     setupModalOverlayCloseEvents();
@@ -1377,78 +1459,73 @@ let currentActiveGroupId = null;
     });
   }
 
+  const RINK_M_TO_PX = 17.5;
+  const RINK_LEFT_OFFSET = 25;
+  const RINK_TOP_OFFSET = (580 - (26 * RINK_M_TO_PX)) / 2;
+  const RINK_LENGTH_PX = 60 * RINK_M_TO_PX;
+  const RINK_WIDTH_PX = 26 * RINK_M_TO_PX;
+  const RINK_CORNER_RADIUS_PX = 8.5 * RINK_M_TO_PX;
+
+  function createOfficialGoalCrease(x, cy, facingRight = true) {
+    const m = RINK_M_TO_PX;
+    const halfBase = 1.22 * m;
+    const straightL = 1.37 * m;
+    const bevel = 0.35 * m;
+    const arcR = 1.83 * m;
+
+    let pathD = '';
+    if (facingRight) {
+      pathD = `M ${x} ${cy - halfBase} 
+               L ${x + straightL - bevel} ${cy - halfBase} 
+               L ${x + straightL} ${cy - halfBase + bevel} 
+               A ${arcR} ${arcR} 0 0 1 ${x + straightL} ${cy + halfBase - bevel} 
+               L ${x + straightL - bevel} ${cy + halfBase} 
+               L ${x} ${cy + halfBase} Z`;
+    } else {
+      pathD = `M ${x} ${cy - halfBase} 
+               L ${x - straightL + bevel} ${cy - halfBase} 
+               L ${x - straightL} ${cy - halfBase + bevel} 
+               A ${arcR} ${arcR} 0 0 0 ${x - straightL} ${cy + halfBase - bevel} 
+               L ${x - straightL + bevel} ${cy + halfBase} 
+               L ${x} ${cy + halfBase} Z`;
+    }
+
+    const creaseArea = new fabric.Path(pathD, {
+      fill: 'rgba(56, 189, 248, 0.32)',
+      stroke: '#dc2626',
+      strokeWidth: 2,
+      selectable: false,
+      evented: false,
+      name: 'rink_bg'
+    });
+
+    return [creaseArea];
+  }
+
   function drawFullIce() {
     currentRinkType = 'full';
     currentVirtualWidth = VIRTUAL_WIDTH_FULL;
     canvas.clear();
-    const w = VIRTUAL_WIDTH_FULL;
-    const h = VIRTUAL_HEIGHT;
-    const red = '#dc2626';
-    const blue = '#2563eb';
 
-    const base = new fabric.Rect({ left: 0, top: 0, width: w, height: h, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
-    const boards = new fabric.Rect({
-      left: 15, top: 15, width: w - 30, height: h - 30, fill: '#ffffff',
-      stroke: '#0284c7', strokeWidth: 4, rx: 55, ry: 55, selectable: false, evented: false, name: 'rink_bg'
-    });
-
-    const centerRed = new fabric.Line([w / 2, 15, w / 2, h - 15], { stroke: red, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const blueL = new fabric.Line([w * 0.35, 15, w * 0.35, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const blueR = new fabric.Line([w * 0.65, 15, w * 0.65, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-
-    const centerCircle = new fabric.Circle({ left: w / 2, top: h / 2, originX: 'center', originY: 'center', radius: 78, fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const centerDot = new fabric.Circle({ left: w / 2, top: h / 2, originX: 'center', originY: 'center', radius: 5, fill: blue, selectable: false, evented: false, name: 'rink_bg' });
-
-    const goalLineL = new fabric.Line([w * 0.10, 35, w * 0.10, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-    const goalLineR = new fabric.Line([w * 0.92, 35, w * 0.92, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-
-    const creaseL = new fabric.Circle({ left: w * 0.10, top: h / 2, originX: 'center', originY: 'center', radius: 22, startAngle: -Math.PI / 2, endAngle: Math.PI / 2, stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg' });
-    const creaseR = new fabric.Circle({ left: w * 0.92, top: h / 2, originX: 'center', originY: 'center', radius: 22, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2, stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg' });
-
-    const trapLineL1 = new fabric.Line([w * 0.10, h * 0.40, 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineL2 = new fabric.Line([w * 0.10, h * 0.60, 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineR1 = new fabric.Line([w * 0.92, h * 0.40, w - 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineR2 = new fabric.Line([w * 0.92, h * 0.60, w - 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-
-    const fixedGoalL = createRealisticGoalObject(w * 0.10, h / 2, true, false);
-    const fixedGoalR = createRealisticGoalObject(w * 0.92, h / 2, false, false);
-
-    canvas.add(base, boards, centerRed, blueL, blueR, centerCircle, centerDot, goalLineL, goalLineR, creaseL, creaseR, trapLineL1, trapLineL2, trapLineR1, trapLineR2, fixedGoalL, fixedGoalR);
-
-    const faceoffX1 = w * 0.22, faceoffX2 = w * 0.78, faceoffY1 = h * 0.28, faceoffY2 = h * 0.72;
-    [{ x: faceoffX1, y: faceoffY1 }, { x: faceoffX1, y: faceoffY2 }, { x: faceoffX2, y: faceoffY1 }, { x: faceoffX2, y: faceoffY2 }].forEach(pt => drawFaceoffCircle(pt.x, pt.y, red));
-
-    const neutralX1 = w * 0.38, neutralX2 = w * 0.62;
-    [{ x: neutralX1, y: h * 0.32 }, { x: neutralX1, y: h * 0.68 }, { x: neutralX2, y: h * 0.32 }, { x: neutralX2, y: h * 0.68 }].forEach(pt => {
-      canvas.add(new fabric.Circle({ left: pt.x, top: pt.y, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
-    });
-
-    drawBenchesAndPenaltyBoxes(w, h);
+    drawFullIceWithoutReset();
 
     if (tracingObject) canvas.add(tracingObject);
-
     lockBackgroundObjects();
     resizeCanvasToFit();
     saveState();
   }
 
-  function drawBenchesAndPenaltyBoxes(w, h) {
-    const benchColor = '#94a3b8';
-    canvas.add(new fabric.Rect({ left: w * 0.38, top: 11, width: w * 0.08, height: 6, fill: benchColor, selectable: false, evented: false, name: 'rink_bg' }));
-    canvas.add(new fabric.Rect({ left: w * 0.54, top: 11, width: w * 0.08, height: 6, fill: benchColor, selectable: false, evented: false, name: 'rink_bg' }));
-    canvas.add(new fabric.Rect({ left: w * 0.42, top: h - 17, width: w * 0.06, height: 6, fill: benchColor, selectable: false, evented: false, name: 'rink_bg' }));
-    canvas.add(new fabric.Rect({ left: w * 0.50, top: h - 17, width: w * 0.04, height: 6, fill: '#ef4444', selectable: false, evented: false, name: 'rink_bg' }));
-    canvas.add(new fabric.Rect({ left: w * 0.55, top: h - 17, width: w * 0.06, height: 6, fill: benchColor, selectable: false, evented: false, name: 'rink_bg' }));
-  }
-
   function drawFaceoffCircle(cx, cy, color) {
-    const r = 48;
+    const r = 4.5 * RINK_M_TO_PX;
     const circle = new fabric.Circle({ left: cx, top: cy, originX: 'center', originY: 'center', radius: r, fill: 'transparent', stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const dot = new fabric.Circle({ left: cx, top: cy, originX: 'center', originY: 'center', radius: 4.5, fill: color, selectable: false, evented: false, name: 'rink_bg' });
-    const h1 = new fabric.Line([cx - 12, cy - r - 4, cx - 12, cy - r + 4], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const h2 = new fabric.Line([cx + 12, cy - r - 4, cx + 12, cy - r + 4], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const h3 = new fabric.Line([cx - 12, cy + r - 4, cx - 12, cy + r + 4], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const h4 = new fabric.Line([cx + 12, cy + r - 4, cx + 12, cy + r + 4], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const dot = new fabric.Circle({ left: cx, top: cy, originX: 'center', originY: 'center', radius: 0.3 * RINK_M_TO_PX, fill: color, selectable: false, evented: false, name: 'rink_bg' });
+    
+    const hashDist = 1.7 * RINK_M_TO_PX;
+    const hashLen = 0.6 * RINK_M_TO_PX;
+    const h1 = new fabric.Line([cx - hashDist, cy - r - hashLen, cx - hashDist, cy - r + hashLen], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const h2 = new fabric.Line([cx + hashDist, cy - r - hashLen, cx + hashDist, cy - r + hashLen], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const h3 = new fabric.Line([cx - hashDist, cy + r - hashLen, cx - hashDist, cy + r + hashLen], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const h4 = new fabric.Line([cx + hashDist, cy + r - hashLen, cx + hashDist, cy + r + hashLen], { stroke: color, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
     canvas.add(circle, dot, h1, h2, h3, h4);
   }
 
@@ -1456,59 +1533,23 @@ let currentActiveGroupId = null;
     currentRinkType = 'half';
     currentVirtualWidth = VIRTUAL_WIDTH_HALF;
     canvas.clear();
-    const wHalf = VIRTUAL_WIDTH_HALF;
-    const h = VIRTUAL_HEIGHT;
-    const red = '#dc2626';
-    const blue = '#2563eb';
 
-    const base = new fabric.Rect({ left: 0, top: 0, width: wHalf, height: h, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
-
-    const boardsHalfPath = `M ${wHalf} 15 L 65 15 A 50 50 0 0 0 15 65 L 15 ${h - 65} A 50 50 0 0 0 65 ${h - 15} L ${wHalf} ${h - 15} Z`;
-    const boards = new fabric.Path(boardsHalfPath, {
-      fill: '#ffffff', stroke: '#0284c7', strokeWidth: 4, selectable: false, evented: false, name: 'rink_bg'
-    });
-
-    const centerRed = new fabric.Line([wHalf, 15, wHalf, h - 15], { stroke: red, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-
-    const centerCircleHalf = new fabric.Circle({
-      left: wHalf, top: h / 2, originX: 'center', originY: 'center',
-      radius: 78, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
-      fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
-    });
-    const centerDotHalf = new fabric.Circle({
-      left: wHalf, top: h / 2, originX: 'center', originY: 'center',
-      radius: 5, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
-      fill: blue, selectable: false, evented: false, name: 'rink_bg'
-    });
-
-    const blueX = VIRTUAL_WIDTH_FULL * 0.35;
-    const blueLine = new fabric.Line([blueX, 15, blueX, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-
-    const neutralX = VIRTUAL_WIDTH_FULL * 0.38;
-    const neutralDot1 = new fabric.Circle({ left: neutralX, top: h * 0.32, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' });
-    const neutralDot2 = new fabric.Circle({ left: neutralX, top: h * 0.68, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' });
-
-    const goalLineX = VIRTUAL_WIDTH_FULL * 0.10;
-    const goalLine = new fabric.Line([goalLineX, 35, goalLineX, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-    const crease = new fabric.Circle({
-      left: goalLineX, top: h / 2, originX: 'center', originY: 'center',
-      radius: 22, startAngle: -Math.PI / 2, endAngle: Math.PI / 2,
-      stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg'
-    });
-
-    const trapLine1 = new fabric.Line([goalLineX, h * 0.40, 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLine2 = new fabric.Line([goalLineX, h * 0.60, 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-
-    const fixedGoal = createRealisticGoalObject(goalLineX, h / 2, true, false);
-
-    canvas.add(base, boards, centerRed, centerCircleHalf, centerDotHalf, blueLine, neutralDot1, neutralDot2, goalLine, crease, trapLine1, trapLine2, fixedGoal);
-
-    const faceoffX = VIRTUAL_WIDTH_FULL * 0.22;
-    drawFaceoffCircle(faceoffX, h * 0.28, red);
-    drawFaceoffCircle(faceoffX, h * 0.72, red);
+    drawHalfIceWithoutReset();
 
     if (tracingObject) canvas.add(tracingObject);
+    lockBackgroundObjects();
+    resizeCanvasToFit();
+    saveState();
+  }
 
+  function drawNeutralZoneIce() {
+    currentRinkType = 'neutral_zone';
+    currentVirtualWidth = VIRTUAL_WIDTH_HALF;
+    canvas.clear();
+
+    drawNeutralZoneWithoutReset();
+
+    if (tracingObject) canvas.add(tracingObject);
     lockBackgroundObjects();
     resizeCanvasToFit();
     saveState();
@@ -1517,8 +1558,80 @@ let currentActiveGroupId = null;
   function setRinkPreset(type) {
     document.getElementById('btnFullRink').classList.toggle('active', type === 'full');
     document.getElementById('btnHalfRink').classList.toggle('active', type === 'half');
+    document.getElementById('btnNeutralZone').classList.toggle('active', type === 'neutral_zone');
+
+    const select = document.getElementById('customBgSelect');
+    if (select) select.value = '';
+
     if (type === 'full') drawFullIce();
-    else drawHalfIce();
+    else if (type === 'half') drawHalfIce();
+    else if (type === 'neutral_zone') drawNeutralZoneIce();
+  }
+
+  function getCustomBgs() {
+    return JSON.parse(localStorage.getItem('hockey_custom_bgs') || '[]');
+  }
+
+  function renderCustomBgsSelect(selectedId = null) {
+    const select = document.getElementById('customBgSelect');
+    if (!select) return;
+    const bgs = getCustomBgs();
+
+    select.innerHTML = '<option value="">-- Выберите свой фон --</option>';
+    bgs.forEach(bg => {
+      const opt = document.createElement('option');
+      opt.value = bg.id;
+      opt.textContent = bg.name;
+      if (selectedId && bg.id == selectedId) opt.selected = true;
+      select.appendChild(opt);
+    });
+  }
+
+  function applyCustomBgImage(dataUrl, isHalf) {
+    fabric.Image.fromURL(dataUrl, function(img) {
+      canvas.clear();
+      currentVirtualWidth = isHalf ? VIRTUAL_WIDTH_HALF : VIRTUAL_WIDTH_FULL;
+      img.scaleToWidth(currentVirtualWidth);
+      img.scaleToHeight(VIRTUAL_HEIGHT);
+      img.set({ selectable: false, evented: false, name: 'rink_bg' });
+      canvas.add(img);
+      if (tracingObject) canvas.add(tracingObject);
+      currentRinkType = isHalf ? 'half' : 'full';
+
+      document.getElementById('btnFullRink').classList.toggle('active', !isHalf);
+      document.getElementById('btnHalfRink').classList.toggle('active', isHalf);
+      document.getElementById('btnNeutralZone').classList.remove('active');
+
+      lockBackgroundObjects();
+      resizeCanvasToFit();
+      saveState();
+    });
+  }
+
+  function applyCustomBgFromSelect(id) {
+    if (!id) return;
+    const bgs = getCustomBgs();
+    const bg = bgs.find(b => b.id == id);
+    if (!bg) return;
+    applyCustomBgImage(bg.data, bg.isHalf);
+    closeContextPopover();
+  }
+
+  function deleteSelectedCustomBg() {
+    const select = document.getElementById('customBgSelect');
+    if (!select || !select.value) {
+      alert('Сначала выберите фон из списка для удаления.');
+      return;
+    }
+    const id = select.value;
+    let bgs = getCustomBgs();
+    const target = bgs.find(b => b.id == id);
+    if (!confirm(`Удалить фон «${target ? target.name : ''}» из списка?`)) return;
+
+    bgs = bgs.filter(b => b.id != id);
+    localStorage.setItem('hockey_custom_bgs', JSON.stringify(bgs));
+    renderCustomBgsSelect();
+    setRinkPreset('full');
   }
 
   function uploadCustomBg(e) {
@@ -1526,22 +1639,36 @@ let currentActiveGroupId = null;
     if (!file) return;
     const reader = new FileReader();
     reader.onload = function(f) {
-      fabric.Image.fromURL(f.target.result, function(img) {
-        canvas.clear();
+      const dataUrl = f.target.result;
+      const img = new Image();
+      img.onload = function() {
         const isHalf = (img.width / img.height < 1.4);
-        currentVirtualWidth = isHalf ? VIRTUAL_WIDTH_HALF : VIRTUAL_WIDTH_FULL;
-        img.scaleToWidth(currentVirtualWidth);
-        img.scaleToHeight(VIRTUAL_HEIGHT);
-        img.set({ selectable: false, evented: false, name: 'rink_bg' });
-        canvas.add(img);
-        if (tracingObject) canvas.add(tracingObject);
-        currentRinkType = isHalf ? 'half' : 'full';
-        document.getElementById('btnFullRink').classList.toggle('active', !isHalf);
-        document.getElementById('btnHalfRink').classList.toggle('active', isHalf);
-        lockBackgroundObjects();
-        resizeCanvasToFit();
-        saveState();
-      });
+        const defaultName = file.name.replace(/\.[^/.]+$/, '') || `Фон льда ${getCustomBgs().length + 1}`;
+        const bgName = prompt('Введите название для сохранения этого фона:', defaultName);
+        if (!bgName) {
+          e.target.value = '';
+          return;
+        }
+
+        const bgs = getCustomBgs();
+        const newBg = {
+          id: Date.now(),
+          name: bgName.trim(),
+          data: dataUrl,
+          isHalf: isHalf
+        };
+        bgs.push(newBg);
+        try {
+          localStorage.setItem('hockey_custom_bgs', JSON.stringify(bgs));
+        } catch (err) {
+          alert('Не удалось сохранить в память браузера (превышен лимит размера изображения). Картинка будет использована без сохранения в список.');
+        }
+
+        renderCustomBgsSelect(newBg.id);
+        applyCustomBgImage(dataUrl, isHalf);
+        e.target.value = '';
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   }
@@ -1658,10 +1785,12 @@ let currentActiveGroupId = null;
     let counter = 1;
     canvas.forEachObject(obj => {
       if (obj.customType === 'player' && obj.playerRole === role) {
-        obj.playerNumber = counter;
-        const textObj = obj.item(1);
-        if (textObj) textObj.set('text', `${role}${counter}`);
-        counter++;
+        if (obj.isStampMode) {
+          obj.playerNumber = counter;
+          const textObj = obj.item(1);
+          if (textObj) textObj.set('text', `${role}${counter}`);
+          counter++;
+        }
       }
     });
     canvas.requestRenderAll();
@@ -1690,34 +1819,44 @@ let currentActiveGroupId = null;
     const { type, options } = placementItem;
 
     if (type === 'player') {
-      const num = getNextPlayerNumber(options.role);
+      const isStamp = (playerStampMode === 'stamp');
+      const num = isStamp ? getNextPlayerNumber(options.role) : '';
+      const displayText = isStamp ? `${options.role}${num}` : options.role;
+
+      const fillColor = (options.role === 'G') ? '#16a34a' : currentColor;
+
       const circle = new fabric.Circle({
-        radius: 14, fill: options.color, stroke: '#ffffff', strokeWidth: 2, originX: 'center', originY: 'center'
+        radius: 14, fill: fillColor, stroke: '#ffffff', strokeWidth: 2, originX: 'center', originY: 'center'
       });
-      const txt = new fabric.Text(`${options.role}${num}`, {
-        fontSize: 12, fill: '#ffffff', fontWeight: 'bold', originX: 'center', originY: 'center', fontFamily: 'sans-serif'
+      const txt = new fabric.Text(displayText, {
+        fontSize: isStamp ? 12 : 14, fill: '#ffffff', fontWeight: 'bold', originX: 'center', originY: 'center', fontFamily: 'sans-serif'
       });
       const player = new fabric.Group([circle, txt], {
         left: pointer.x, top: pointer.y, originX: 'center', originY: 'center',
         scaleX: globalObjectScale, scaleY: globalObjectScale,
         selectable: true, hasControls: true, customType: 'player',
-        playerRole: options.role, playerNumber: num
+        playerRole: options.role, playerNumber: num,
+        isStampMode: isStamp
       });
       canvas.add(player);
 
     } else if (type === 'coach') {
-      const num = getNextPlayerNumber('C');
+      const isStamp = (playerStampMode === 'stamp');
+      const num = isStamp ? getNextPlayerNumber('C') : '';
+      const displayText = isStamp ? (num > 1 ? `C${num}` : 'C') : 'C';
+
       const circle = new fabric.Circle({
         radius: 14, fill: '#0f172a', stroke: '#ffffff', strokeWidth: 2, originX: 'center', originY: 'center'
       });
-      const txt = new fabric.Text(num > 1 ? `C${num}` : 'C', {
+      const txt = new fabric.Text(displayText, {
         fontSize: 13, fill: '#ffffff', fontWeight: 'bold', originX: 'center', originY: 'center', fontFamily: 'sans-serif'
       });
       const coach = new fabric.Group([circle, txt], {
         left: pointer.x, top: pointer.y, originX: 'center', originY: 'center',
         scaleX: globalObjectScale, scaleY: globalObjectScale,
         selectable: true, hasControls: true, customType: 'player',
-        playerRole: 'C', playerNumber: num
+        playerRole: 'C', playerNumber: num,
+        isStampMode: isStamp
       });
       canvas.add(coach);
 
@@ -2038,49 +2177,76 @@ let currentActiveGroupId = null;
     return null;
   }
 
-function setupCanvasEvents() {
-    // Выделение линии отображает её точки в режиме "select"
+  function setupCanvasEvents() {
     canvas.on('selection:created', (e) => {
-      if (currentTool === 'select' && e.selected && e.selected.length === 1 && e.selected[0].controlPoints) {
-        renderLineHandles(e.selected[0]);
-      } else {
+      const selected = e.selected || [];
+      if (selected.length === 1 && selected[0].controlPoints) {
+        renderLineHandles(selected[0]);
+      } else if (!selected.some(o => o.isControlHandle)) {
         clearLineHandles();
       }
     });
 
     canvas.on('selection:updated', (e) => {
-      if (currentTool === 'select' && e.selected && e.selected.length === 1 && e.selected[0].controlPoints) {
-        renderLineHandles(e.selected[0]);
-      } else {
+      const selected = e.selected || [];
+      if (selected.length === 1 && selected[0].controlPoints) {
+        renderLineHandles(selected[0]);
+      } else if (!selected.some(o => o.isControlHandle)) {
         clearLineHandles();
       }
     });
 
-    canvas.on('selection:cleared', () => {
-      clearLineHandles();
+    canvas.on('selection:cleared', (e) => {
+      setTimeout(() => {
+        const active = canvas.getActiveObject();
+        if (!active || !active.isControlHandle) {
+          clearLineHandles();
+        }
+      }, 10);
     });
 
-    // Обработка перетаскивания точек-ручек
     canvas.on('object:moving', (e) => {
       const target = e.target;
-      if (target && target.isControlHandle && activeControlLine) {
+      if (!target) return;
+
+      if (target.controlPoints && target === activeControlLine) {
+        const dx = target.left - target.lastLeft;
+        const dy = target.top - target.lastTop;
+        target.lastLeft = target.left;
+        target.lastTop = target.top;
+
+        target.controlPoints.forEach(pt => {
+          pt.x += dx;
+          pt.y += dy;
+        });
+
+        activeControlHandles.forEach(h => {
+          h.left += dx;
+          h.top += dy;
+          h.setCoords();
+        });
+        canvas.requestRenderAll();
+        return;
+      }
+
+      if (target.isControlHandle && activeControlLine) {
         const pointer = { x: target.left, y: target.top };
+
         if (target.isMidpoint) {
-          // Вытягивание середины сегмента превращает прямую в дугу (добавляет точку)
           const insertIdx = target.segIndex + 1;
           activeControlLine.controlPoints.splice(insertIdx, 0, pointer);
           updateTacticalGroupFromPoints(activeControlLine);
           renderLineHandles(activeControlLine);
-          // Перехватываем управление новой постоянной вершиной
-          const newHandle = activeControlHandles.find(h => !h.isMidpoint && h.pointIndex === insertIdx);
-          if (newHandle) canvas.setActiveObject(newHandle);
+
+          const newVertexHandle = activeControlHandles.find(h => !h.isMidpoint && h.pointIndex === insertIdx);
+          if (newVertexHandle) {
+            canvas.setActiveObject(newVertexHandle);
+          }
         } else {
-          // Перемещение начала, конца или промежуточной точки
           activeControlLine.controlPoints[target.pointIndex] = pointer;
           updateTacticalGroupFromPoints(activeControlLine);
-          // Обновляем позиции промежуточных желтых точек
-          for (let i = 0; i < activeControlHandles.length; i++) {
-            const h = activeControlHandles[i];
+
+          activeControlHandles.forEach(h => {
             if (h.isMidpoint) {
               const pts = activeControlLine.controlPoints;
               h.set({
@@ -2089,22 +2255,47 @@ function setupCanvasEvents() {
               });
               h.setCoords();
             }
-          }
+          });
         }
         canvas.requestRenderAll();
       }
     });
 
+    canvas.on('mouse:down:before', (opt) => {
+      if (opt.target && opt.target.controlPoints) {
+        opt.target.lastLeft = opt.target.left;
+        opt.target.lastTop = opt.target.top;
+      }
+    });
+
     canvas.on('object:modified', (e) => {
-      if (e.target && e.target.isControlHandle && activeControlLine) {
+      if (e.target && (e.target.isControlHandle || e.target.controlPoints)) {
         saveState();
+      }
+    });
+
+    canvas.on('mouse:dblclick', (opt) => {
+      const target = opt.target;
+      if (target && target.customType === 'player') {
+        const textObj = target.item(1);
+        const currentTxt = textObj ? textObj.text : '';
+        const newTxt = prompt('Введите подпись фишки (например: F, FL, RD, LW):', currentTxt);
+        if (newTxt !== null && newTxt.trim() !== '') {
+          target.isStampMode = false;
+          textObj.set({
+            text: newTxt.trim(),
+            fontSize: newTxt.trim().length > 2 ? 10 : 13
+          });
+          target.addWithUpdate();
+          canvas.requestRenderAll();
+          saveState();
+        }
       }
     });
 
     canvas.on('mouse:down', (opt) => {
       const p = canvas.getPointer(opt.e);
 
-      // Если кликнули по контрольной ручке — не перебиваем перемещение
       if (opt.target && opt.target.isControlHandle) {
         return;
       }
@@ -2211,62 +2402,47 @@ function setupCanvasEvents() {
           canvas.add(group);
           saveState();
         }
-} else if (currentTool === 'straightArrow' && straightLine) {
+      } else if (currentTool === 'straightArrow' && straightLine) {
         const x1 = straightLine.x1, y1 = straightLine.y1, x2 = straightLine.x2, y2 = straightLine.y2;
         canvas.remove(straightLine);
         straightLine = null;
 
         if (Math.hypot(x2 - x1, y2 - y1) > 8) {
           const pts = [{ x: x1, y: y1 }, { x: x2, y: y2 }];
-          const { svg, dots } = generateHockeyTacticalSVG(pts, currentPattern);
-          const lineObj = new fabric.Path(svg, {
-            stroke: currentColor,
-            strokeWidth: (currentPattern === 'pucks_line') ? Math.round(5 * globalObjectScale) : strokeWidth,
-            strokeDashArray: getStrokeDashForPattern(currentPattern),
-            fill: 'transparent',
-            strokeLineCap: 'round',
-            strokeLineJoin: 'round'
-          });
-
-          const items = [lineObj];
-          dots.forEach(d => {
-            items.push(new fabric.Circle({
-              left: d.x, top: d.y, radius: 2.6 * globalObjectScale, fill: currentColor, originX: 'center', originY: 'center'
-            }));
-          });
-
-          const angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
-          const marker = createTacticalEnding(x2, y2, angle);
-
-          if (marker) items.push(marker);
-          const group = new fabric.Group(items, {
-            selectable: true,
-            hasControls: false, // ручки заменяют габаритные рамки
-            customType: 'tactical_trajectory',
-            controlPoints: pts,
-            linePattern: currentPattern,
-            lineColor: currentColor,
-            lineEnding: currentEnding
-          });
+          const group = buildTrajectoryGroup(pts, currentPattern, currentColor, currentEnding);
           canvas.add(group);
-          // Автоматически отображаем 3 контрольные точки (начало, середина, конец)
           renderLineHandles(group);
           saveState();
         }
       }
+    });
+  }
 
   function deleteActiveObject() {
-    const activeObj = canvas.getActiveObject();
-    if (activeObj && !activeObj.isEditing && activeObj.name !== 'rink_bg') {
-      if (activeObj === tracingObject) {
-        removeTracing();
-        return;
+    const activeObjects = canvas.getActiveObjects ? canvas.getActiveObjects() : [canvas.getActiveObject()];
+    if (!activeObjects || activeObjects.length === 0) return;
+
+    let rolesToRenumber = new Set();
+
+    activeObjects.forEach(obj => {
+      if (obj && !obj.isEditing && obj.name !== 'rink_bg') {
+        if (obj === tracingObject) {
+          removeTracing();
+        } else {
+          if (obj.playerRole && obj.isStampMode) {
+            rolesToRenumber.add(obj.playerRole);
+          }
+          canvas.remove(obj);
+        }
       }
-      const removedRole = activeObj.playerRole;
-      canvas.remove(activeObj);
-      if (removedRole) renumberPlayers(removedRole);
-      saveState();
-    }
+    });
+
+    clearLineHandles();
+    canvas.discardActiveObject();
+
+    rolesToRenumber.forEach(role => renumberPlayers(role));
+    canvas.requestRenderAll();
+    saveState();
   }
 
   function setupKeyEvents() {
@@ -2275,7 +2451,11 @@ function setupCanvasEvents() {
         setTool('select');
         closeContextPopover();
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') deleteActiveObject();
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const activeObj = canvas.getActiveObject();
+        if (activeObj && activeObj.isEditing) return;
+        deleteActiveObject();
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -2288,7 +2468,7 @@ function setupCanvasEvents() {
     });
   }
 
-function setTool(tool) {
+  function setTool(tool) {
     clearLineHandles();
     currentTool = tool;
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -2301,7 +2481,7 @@ function setTool(tool) {
     if (idMap[tool]) document.getElementById(idMap[tool]).classList.add('active');
 
     const hint = document.getElementById('hintBar');
-    if (tool === 'select') hint.textContent = 'Режим выбора: перемещение, вращение и масштабирование';
+    if (tool === 'select') hint.textContent = 'Режим выбора: перемещение, вращение и выделение рамкой';
     else if (tool === 'brush') hint.textContent = 'Кисть: рисуйте тактическую траекторию на льду';
     else if (tool === 'straightArrow') hint.textContent = 'Прямая: протяните линию от точки к точке';
     else if (tool === 'eraser') hint.textContent = 'Ластик: кликните на объект для удаления';
@@ -2354,7 +2534,7 @@ function setTool(tool) {
 
   function saveState() {
     if (isStateChanging) return;
-    const jsonState = JSON.stringify(canvas.toJSON(['name', 'customType', 'playerRole', 'playerNumber']));
+    const jsonState = JSON.stringify(canvas.toJSON(['name', 'customType', 'playerRole', 'playerNumber', 'isStampMode']));
 
     if (undoHistory.length > 0 && undoHistory[undoHistory.length - 1] === jsonState) {
       return;
@@ -2403,6 +2583,7 @@ function setTool(tool) {
   function clearCanvas() {
     if (confirm('Очистить планшет? Все расставленные элементы пропадут.')) {
       if (currentRinkType === 'half') drawHalfIce();
+      else if (currentRinkType === 'neutral_zone') drawNeutralZoneIce();
       else drawFullIce();
     }
   }
@@ -2441,7 +2622,7 @@ function setTool(tool) {
 
     const canvasObjectsToSave = canvas.getObjects().filter(obj => obj !== tracingObject && obj.name !== 'rink_bg');
     const canvasData = {
-      objects: canvasObjectsToSave.map(obj => obj.toObject(['name', 'customType', 'playerRole', 'playerNumber'])),
+      objects: canvasObjectsToSave.map(obj => obj.toObject(['name', 'customType', 'playerRole', 'playerNumber', 'isStampMode'])),
       background: canvas.backgroundColor
     };
     const json = JSON.stringify(canvasData);
@@ -2480,14 +2661,14 @@ function setTool(tool) {
       thumb: thumb,
       fullImage: highResImage,
       data: json,
-      isHalfRink: (currentRinkType === 'half'),
+      isHalfRink: (currentRinkType !== 'full'),
+      rinkType: currentRinkType,
       aspectRatio: currentVirtualWidth / VIRTUAL_HEIGHT
     });
     localStorage.setItem('hockey_pro_drills', JSON.stringify(drills));
     alert(`Схема сохранена как «${finalTitle}»!`);
   }
 
-  // ОБНОВЛЕННЫЙ ЭКСПОРТ РЕЗЕРВА: СИСТЕМНЫЙ ШЕРИНГ В МЕССЕНДЖЕРЫ НА СМАРТФОНАХ
   async function exportDatabaseJSON() {
     const drills = getDrills();
     if (drills.length === 0) {
@@ -2762,16 +2943,17 @@ function setTool(tool) {
 
     const loadAndRender = (canvasData) => {
       canvas.clear();
-      currentRinkType = d.isHalfRink ? 'half' : 'full';
-      currentVirtualWidth = d.isHalfRink ? VIRTUAL_WIDTH_HALF : VIRTUAL_WIDTH_FULL;
-      document.getElementById('btnFullRink').classList.toggle('active', !d.isHalfRink);
-      document.getElementById('btnHalfRink').classList.toggle('active', !!d.isHalfRink);
+      const rType = d.rinkType || (d.isHalfRink ? 'half' : 'full');
+      currentRinkType = rType;
+      currentVirtualWidth = (rType === 'full') ? VIRTUAL_WIDTH_FULL : VIRTUAL_WIDTH_HALF;
 
-      if (currentRinkType === 'half') {
-        drawHalfIceWithoutReset();
-      } else {
-        drawFullIceWithoutReset();
-      }
+      document.getElementById('btnFullRink').classList.toggle('active', rType === 'full');
+      document.getElementById('btnHalfRink').classList.toggle('active', rType === 'half');
+      document.getElementById('btnNeutralZone').classList.toggle('active', rType === 'neutral_zone');
+
+      if (rType === 'half') drawHalfIceWithoutReset();
+      else if (rType === 'neutral_zone') drawNeutralZoneWithoutReset();
+      else drawFullIceWithoutReset();
 
       if (canvasData && canvasData.objects) {
         fabric.util.enlivenObjects(canvasData.objects, (enlivenedObjects) => {
@@ -2812,75 +2994,233 @@ function setTool(tool) {
   }
 
   function drawFullIceWithoutReset() {
-    const w = VIRTUAL_WIDTH_FULL;
-    const h = VIRTUAL_HEIGHT;
+    const totalW = VIRTUAL_WIDTH_FULL;
+    const totalH = VIRTUAL_HEIGHT;
+    const m = RINK_M_TO_PX;
+    const leftX = RINK_LEFT_OFFSET;
+    const rightX = leftX + RINK_LENGTH_PX;
+    const topY = RINK_TOP_OFFSET;
+    const bottomY = topY + RINK_WIDTH_PX;
+    const centerY = (topY + bottomY) / 2;
+    const centerX = leftX + RINK_LENGTH_PX / 2;
+
     const red = '#dc2626';
     const blue = '#2563eb';
 
-    const base = new fabric.Rect({ left: 0, top: 0, width: w, height: h, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
-    const boards = new fabric.Rect({ left: 15, top: 15, width: w - 30, height: h - 30, fill: '#ffffff', stroke: '#0284c7', strokeWidth: 4, rx: 55, ry: 55, selectable: false, evented: false, name: 'rink_bg' });
-    const centerRed = new fabric.Line([w / 2, 15, w / 2, h - 15], { stroke: red, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const blueL = new fabric.Line([w * 0.35, 15, w * 0.35, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const blueR = new fabric.Line([w * 0.65, 15, w * 0.65, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const centerCircle = new fabric.Circle({ left: w / 2, top: h / 2, originX: 'center', originY: 'center', radius: 78, fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const centerDot = new fabric.Circle({ left: w / 2, top: h / 2, originX: 'center', originY: 'center', radius: 5, fill: blue, selectable: false, evented: false, name: 'rink_bg' });
-    const goalLineL = new fabric.Line([w * 0.10, 35, w * 0.10, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-    const goalLineR = new fabric.Line([w * 0.92, 35, w * 0.92, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-    const creaseL = new fabric.Circle({ left: w * 0.10, top: h / 2, originX: 'center', originY: 'center', radius: 22, startAngle: -Math.PI / 2, endAngle: Math.PI / 2, stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg' });
-    const creaseR = new fabric.Circle({ left: w * 0.92, top: h / 2, originX: 'center', originY: 'center', radius: 22, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2, stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg' });
+    const base = new fabric.Rect({ left: 0, top: 0, width: totalW, height: totalH, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
 
-    const trapLineL1 = new fabric.Line([w * 0.10, h * 0.40, 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineL2 = new fabric.Line([w * 0.10, h * 0.60, 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineR1 = new fabric.Line([w * 0.92, h * 0.40, w - 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLineR2 = new fabric.Line([w * 0.92, h * 0.60, w - 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const boards = new fabric.Rect({
+      left: leftX, top: topY, width: RINK_LENGTH_PX, height: RINK_WIDTH_PX,
+      fill: '#ffffff', stroke: '#0284c7', strokeWidth: 4,
+      rx: RINK_CORNER_RADIUS_PX, ry: RINK_CORNER_RADIUS_PX,
+      selectable: false, evented: false, name: 'rink_bg'
+    });
+    canvas.add(base, boards);
 
-    const fixedGoalL = createRealisticGoalObject(w * 0.10, h / 2, true, false);
-    const fixedGoalR = createRealisticGoalObject(w * 0.92, h / 2, false, false);
+    const goalLineDist = 3.35 * m;
+    const R_px = RINK_CORNER_RADIUS_PX;
+    const dy_from_center_of_arc = Math.sqrt(Math.max(0, R_px * R_px - Math.pow(R_px - goalLineDist, 2)));
+    const goalLineHalfLen = (RINK_WIDTH_PX / 2 - R_px) + dy_from_center_of_arc;
 
-    canvas.add(base, boards, centerRed, blueL, blueR, centerCircle, centerDot, goalLineL, goalLineR, creaseL, creaseR, trapLineL1, trapLineL2, trapLineR1, trapLineR2, fixedGoalL, fixedGoalR);
+    const goalLineLX = leftX + goalLineDist;
+    const goalLineRX = rightX - goalLineDist;
+    const goalLineL = new fabric.Line([goalLineLX, centerY - goalLineHalfLen, goalLineLX, centerY + goalLineHalfLen], { stroke: red, strokeWidth: 2.5, selectable: false, evented: false, name: 'rink_bg' });
+    const goalLineR = new fabric.Line([goalLineRX, centerY - goalLineHalfLen, goalLineRX, centerY + goalLineHalfLen], { stroke: red, strokeWidth: 2.5, selectable: false, evented: false, name: 'rink_bg' });
 
-    const faceoffX1 = w * 0.22, faceoffX2 = w * 0.78, faceoffY1 = h * 0.28, faceoffY2 = h * 0.72;
-    [{ x: faceoffX1, y: faceoffY1 }, { x: faceoffX1, y: faceoffY2 }, { x: faceoffX2, y: faceoffY1 }, { x: faceoffX2, y: faceoffY2 }].forEach(pt => drawFaceoffCircle(pt.x, pt.y, red));
+    const blueDist = 22.86 * m;
+    const blueWidth = 0.3 * m;
+    const blueLineLX = leftX + blueDist;
+    const blueLineRX = rightX - blueDist;
+    const blueL = new fabric.Line([blueLineLX, topY, blueLineLX, bottomY], { stroke: blue, strokeWidth: blueWidth, selectable: false, evented: false, name: 'rink_bg' });
+    const blueR = new fabric.Line([blueLineRX, topY, blueLineRX, bottomY], { stroke: blue, strokeWidth: blueWidth, selectable: false, evented: false, name: 'rink_bg' });
 
-    const neutralX1 = w * 0.38, neutralX2 = w * 0.62;
-    [{ x: neutralX1, y: h * 0.32 }, { x: neutralX1, y: h * 0.68 }, { x: neutralX2, y: h * 0.32 }, { x: neutralX2, y: h * 0.68 }].forEach(pt => {
-      canvas.add(new fabric.Circle({ left: pt.x, top: pt.y, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
+    const centerRed = new fabric.Line([centerX, topY, centerX, bottomY], { stroke: red, strokeWidth: blueWidth, selectable: false, evented: false, name: 'rink_bg' });
+
+    const centerRadius = 4.5 * m;
+    const centerCircle = new fabric.Circle({ left: centerX, top: centerY, originX: 'center', originY: 'center', radius: centerRadius, fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const centerDot = new fabric.Circle({ left: centerX, top: centerY, originX: 'center', originY: 'center', radius: 0.3 * m, fill: blue, selectable: false, evented: false, name: 'rink_bg' });
+
+    const refereeCrease = new fabric.Circle({
+      left: centerX, top: bottomY, originX: 'center', originY: 'center',
+      radius: 3.0 * m, startAngle: Math.PI, endAngle: 2 * Math.PI,
+      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
     });
 
-    drawBenchesAndPenaltyBoxes(w, h);
+    const trapGoalHalfW = 3.35 * m;
+    const trapBoardHalfW = 4.265 * m;
+
+    const trapL_Top = new fabric.Line([goalLineLX, centerY - trapGoalHalfW, leftX, centerY - trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const trapL_Bottom = new fabric.Line([goalLineLX, centerY + trapGoalHalfW, leftX, centerY + trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+
+    const trapR_Top = new fabric.Line([goalLineRX, centerY - trapGoalHalfW, rightX, centerY - trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const trapR_Bottom = new fabric.Line([goalLineRX, centerY + trapGoalHalfW, rightX, centerY + trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+
+    const creaseLeftObjs = createOfficialGoalCrease(goalLineLX, centerY, true);
+    const creaseRightObjs = createOfficialGoalCrease(goalLineRX, centerY, false);
+
+    canvas.add(
+      goalLineL, goalLineR, blueL, blueR, centerRed,
+      centerCircle, centerDot, refereeCrease,
+      trapL_Top, trapL_Bottom, trapR_Top, trapR_Bottom,
+      ...creaseLeftObjs, ...creaseRightObjs
+    );
+
+    const faceoffDistX = 6.1 * m;
+    const faceoffDistY = 6.7 * m;
+    const endFaceoffSpots = [
+      { x: goalLineLX + faceoffDistX, y: centerY - faceoffDistY },
+      { x: goalLineLX + faceoffDistX, y: centerY + faceoffDistY },
+      { x: goalLineRX - faceoffDistX, y: centerY - faceoffDistY },
+      { x: goalLineRX - faceoffDistX, y: centerY + faceoffDistY }
+    ];
+    endFaceoffSpots.forEach(pt => drawFaceoffCircle(pt.x, pt.y, red));
+
+    const neutralDistX = 1.5 * m;
+    const neutralSpots = [
+      { x: blueLineLX + neutralDistX, y: centerY - faceoffDistY },
+      { x: blueLineLX + neutralDistX, y: centerY + faceoffDistY },
+      { x: blueLineRX - neutralDistX, y: centerY - faceoffDistY },
+      { x: blueLineRX - neutralDistX, y: centerY + faceoffDistY }
+    ];
+    neutralSpots.forEach(pt => {
+      canvas.add(new fabric.Circle({ left: pt.x, top: pt.y, originX: 'center', originY: 'center', radius: 0.3 * m, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
+    });
+
+    const benchW = 8 * m;
+    canvas.add(new fabric.Rect({ left: centerX - benchW - 2 * m, top: topY - 7, width: benchW, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX + 2 * m, top: topY - 7, width: benchW, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX - 6 * m, top: bottomY + 1, width: 4.5 * m, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX - 1.5 * m, top: bottomY + 1, width: 3 * m, height: 6, fill: '#ef4444', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX + 1.5 * m, top: bottomY + 1, width: 4.5 * m, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+
     lockBackgroundObjects();
   }
 
   function drawHalfIceWithoutReset() {
-    const wHalf = VIRTUAL_WIDTH_HALF;
-    const h = VIRTUAL_HEIGHT;
+    const totalW = VIRTUAL_WIDTH_HALF;
+    const totalH = VIRTUAL_HEIGHT;
+    const m = RINK_M_TO_PX;
+    const leftX = 20;
+    const rightX = totalW;
+    const topY = RINK_TOP_OFFSET;
+    const bottomY = topY + RINK_WIDTH_PX;
+    const centerY = (topY + bottomY) / 2;
+
     const red = '#dc2626';
     const blue = '#2563eb';
 
-    const base = new fabric.Rect({ left: 0, top: 0, width: wHalf, height: h, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
-    const boardsHalfPath = `M ${wHalf} 15 L 65 15 A 50 50 0 0 0 15 65 L 15 ${h - 65} A 50 50 0 0 0 65 ${h - 15} L ${wHalf} ${h - 15} Z`;
+    const base = new fabric.Rect({ left: 0, top: 0, width: totalW, height: totalH, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
+
+    const boardsHalfPath = `M ${rightX} ${topY} L ${leftX + RINK_CORNER_RADIUS_PX} ${topY} A ${RINK_CORNER_RADIUS_PX} ${RINK_CORNER_RADIUS_PX} 0 0 0 ${leftX} ${topY + RINK_CORNER_RADIUS_PX} L ${leftX} ${bottomY - RINK_CORNER_RADIUS_PX} A ${RINK_CORNER_RADIUS_PX} ${RINK_CORNER_RADIUS_PX} 0 0 0 ${leftX + RINK_CORNER_RADIUS_PX} ${bottomY} L ${rightX} ${bottomY} Z`;
     const boards = new fabric.Path(boardsHalfPath, { fill: '#ffffff', stroke: '#0284c7', strokeWidth: 4, selectable: false, evented: false, name: 'rink_bg' });
-    const centerRed = new fabric.Line([wHalf, 15, wHalf, h - 15], { stroke: red, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const centerCircleHalf = new fabric.Circle({ left: wHalf, top: h / 2, originX: 'center', originY: 'center', radius: 78, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2, fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const centerDotHalf = new fabric.Circle({ left: wHalf, top: h / 2, originX: 'center', originY: 'center', radius: 5, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2, fill: blue, selectable: false, evented: false, name: 'rink_bg' });
-    const blueX = VIRTUAL_WIDTH_FULL * 0.35;
-    const blueLine = new fabric.Line([blueX, 15, blueX, h - 15], { stroke: blue, strokeWidth: 5, selectable: false, evented: false, name: 'rink_bg' });
-    const neutralX = VIRTUAL_WIDTH_FULL * 0.38;
-    const neutralDot1 = new fabric.Circle({ left: neutralX, top: h * 0.32, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' });
-    const neutralDot2 = new fabric.Circle({ left: neutralX, top: h * 0.68, originX: 'center', originY: 'center', radius: 4.5, fill: red, selectable: false, evented: false, name: 'rink_bg' });
-    const goalLineX = VIRTUAL_WIDTH_FULL * 0.10;
-    const goalLine = new fabric.Line([goalLineX, 35, goalLineX, h - 35], { stroke: red, strokeWidth: 3, selectable: false, evented: false, name: 'rink_bg' });
-    const crease = new fabric.Circle({ left: goalLineX, top: h / 2, originX: 'center', originY: 'center', radius: 22, startAngle: -Math.PI / 2, endAngle: Math.PI / 2, stroke: red, strokeWidth: 2, fill: 'rgba(56, 189, 248, 0.25)', selectable: false, evented: false, name: 'rink_bg' });
+    canvas.add(base, boards);
 
-    const trapLine1 = new fabric.Line([goalLineX, h * 0.40, 18, h * 0.34], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const trapLine2 = new fabric.Line([goalLineX, h * 0.60, 18, h * 0.66], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
-    const fixedGoal = createRealisticGoalObject(goalLineX, h / 2, true, false);
+    const centerRed = new fabric.Line([rightX - 2, topY, rightX - 2, bottomY], { stroke: red, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
 
-    canvas.add(base, boards, centerRed, centerCircleHalf, centerDotHalf, blueLine, neutralDot1, neutralDot2, goalLine, crease, trapLine1, trapLine2, fixedGoal);
+    const centerRadius = 4.5 * m;
+    const centerCircleHalf = new fabric.Circle({
+      left: rightX, top: centerY, originX: 'center', originY: 'center',
+      radius: centerRadius, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
+      fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
+    });
+    const centerDotHalf = new fabric.Circle({
+      left: rightX, top: centerY, originX: 'center', originY: 'center',
+      radius: 0.3 * m, startAngle: Math.PI / 2, endAngle: (3 * Math.PI) / 2,
+      fill: blue, selectable: false, evented: false, name: 'rink_bg'
+    });
 
-    const faceoffX = VIRTUAL_WIDTH_FULL * 0.22;
-    drawFaceoffCircle(faceoffX, h * 0.28, red);
-    drawFaceoffCircle(faceoffX, h * 0.72, red);
+    const blueLineX = rightX - (7.14 * m);
+    const blueLine = new fabric.Line([blueLineX, topY, blueLineX, bottomY], { stroke: blue, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
+
+    const goalLineDist = 3.35 * m;
+    const R_px = RINK_CORNER_RADIUS_PX;
+    const dy_from_center_of_arc = Math.sqrt(Math.max(0, R_px * R_px - Math.pow(R_px - goalLineDist, 2)));
+    const goalLineHalfLen = (RINK_WIDTH_PX / 2 - R_px) + dy_from_center_of_arc;
+
+    const goalLineX = leftX + goalLineDist;
+    const goalLine = new fabric.Line([goalLineX, centerY - goalLineHalfLen, goalLineX, centerY + goalLineHalfLen], { stroke: red, strokeWidth: 2.5, selectable: false, evented: false, name: 'rink_bg' });
+
+    const trapGoalHalfW = 3.35 * m;
+    const trapBoardHalfW = 4.265 * m;
+    const trapLine1 = new fabric.Line([goalLineX, centerY - trapGoalHalfW, leftX, centerY - trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const trapLine2 = new fabric.Line([goalLineX, centerY + trapGoalHalfW, leftX, centerY + trapBoardHalfW], { stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+
+    const creaseObjs = createOfficialGoalCrease(goalLineX, centerY, true);
+
+    canvas.add(centerRed, centerCircleHalf, centerDotHalf, blueLine, goalLine, trapLine1, trapLine2, ...creaseObjs);
+
+    const faceoffDistX = 6.1 * m;
+    const faceoffDistY = 6.7 * m;
+    drawFaceoffCircle(goalLineX + faceoffDistX, centerY - faceoffDistY, red);
+    drawFaceoffCircle(goalLineX + faceoffDistX, centerY + faceoffDistY, red);
+
+    const neutralX = blueLineX + (1.5 * m);
+    if (neutralX < rightX - 6) {
+      canvas.add(new fabric.Circle({ left: neutralX, top: centerY - faceoffDistY, originX: 'center', originY: 'center', radius: 0.3 * m, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
+      canvas.add(new fabric.Circle({ left: neutralX, top: centerY + faceoffDistY, originX: 'center', originY: 'center', radius: 0.3 * m, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
+    }
+
+    lockBackgroundObjects();
+  }
+
+  function drawNeutralZoneWithoutReset() {
+    const totalW = VIRTUAL_WIDTH_HALF;
+    const totalH = VIRTUAL_HEIGHT;
+    const m = RINK_M_TO_PX;
+    const leftX = 20;
+    const rightX = totalW - 20;
+    const topY = RINK_TOP_OFFSET;
+    const bottomY = topY + RINK_WIDTH_PX;
+    const centerY = (topY + bottomY) / 2;
+    const centerX = (leftX + rightX) / 2;
+
+    const red = '#dc2626';
+    const blue = '#2563eb';
+
+    const base = new fabric.Rect({ left: 0, top: 0, width: totalW, height: totalH, fill: '#f8fafc', selectable: false, evented: false, name: 'rink_bg' });
+
+    const boards = new fabric.Rect({
+      left: leftX, top: topY, width: rightX - leftX, height: RINK_WIDTH_PX,
+      fill: '#ffffff', stroke: '#0284c7', strokeWidth: 4,
+      selectable: false, evented: false, name: 'rink_bg'
+    });
+    canvas.add(base, boards);
+
+    const blueLineL = new fabric.Line([leftX, topY, leftX, bottomY], { stroke: blue, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
+    const blueLineR = new fabric.Line([rightX, topY, rightX, bottomY], { stroke: blue, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
+
+    const centerRed = new fabric.Line([centerX, topY, centerX, bottomY], { stroke: red, strokeWidth: 0.3 * m, selectable: false, evented: false, name: 'rink_bg' });
+
+    const centerRadius = 4.5 * m;
+    const centerCircle = new fabric.Circle({ left: centerX, top: centerY, originX: 'center', originY: 'center', radius: centerRadius, fill: 'transparent', stroke: blue, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg' });
+    const centerDot = new fabric.Circle({ left: centerX, top: centerY, originX: 'center', originY: 'center', radius: 0.3 * m, fill: blue, selectable: false, evented: false, name: 'rink_bg' });
+
+    const refereeCrease = new fabric.Circle({
+      left: centerX, top: bottomY, originX: 'center', originY: 'center',
+      radius: 3.0 * m, startAngle: Math.PI, endAngle: 2 * Math.PI,
+      fill: 'transparent', stroke: red, strokeWidth: 2, selectable: false, evented: false, name: 'rink_bg'
+    });
+
+    canvas.add(blueLineL, blueLineR, centerRed, centerCircle, centerDot, refereeCrease);
+
+    const neutralDistX = 1.5 * m;
+    const neutralDistY = 6.7 * m;
+    const neutralSpots = [
+      { x: leftX + neutralDistX, y: centerY - neutralDistY },
+      { x: leftX + neutralDistX, y: centerY + neutralDistY },
+      { x: rightX - neutralDistX, y: centerY - neutralDistY },
+      { x: rightX - neutralDistX, y: centerY + neutralDistY }
+    ];
+    neutralSpots.forEach(pt => {
+      canvas.add(new fabric.Circle({ left: pt.x, top: pt.y, originX: 'center', originY: 'center', radius: 0.3 * m, fill: red, selectable: false, evented: false, name: 'rink_bg' }));
+    });
+
+    const benchW = 7 * m;
+    canvas.add(new fabric.Rect({ left: centerX - benchW - 1.5 * m, top: topY - 7, width: benchW, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX + 1.5 * m, top: topY - 7, width: benchW, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX - 5 * m, top: bottomY + 1, width: 4 * m, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX - 1 * m, top: bottomY + 1, width: 2 * m, height: 6, fill: '#ef4444', selectable: false, evented: false, name: 'rink_bg' }));
+    canvas.add(new fabric.Rect({ left: centerX + 1 * m, top: bottomY + 1, width: 4 * m, height: 6, fill: '#94a3b8', selectable: false, evented: false, name: 'rink_bg' }));
 
     lockBackgroundObjects();
   }
